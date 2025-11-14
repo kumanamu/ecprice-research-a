@@ -1,0 +1,71 @@
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/ecprice?useSSL=false&serverTimezone=Asia/Seoul&characterEncoding=UTF-8
+    username: root
+    password: 1111
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        format_sql: true
+
+
+# ========== OPENAI (번역 / 요약 / NLP) ==========
+openai:
+  api:
+    key: "${OPENAI_API_KEY}"
+
+
+# ========== NAVER SHOPPING API ==========
+naver:
+  client:
+    id: "${NAVER_CLIENT_ID}"
+    secret: "${NAVER_CLIENT_SECRET}"
+
+
+# ========== COUPANG AFFILIATE API ==========
+coupang:
+  partnerId: ${COUPANG_PARTNER_ID}
+  accessKey: ${COUPANG_ACCESS_KEY}
+  secretKey: ${COUPANG_SECRET_KEY}
+  apiUrl: "https://api-gateway.coupang.com/v2/providers/affiliate_open_api/apis/openapi/products/search"
+
+
+# ========== RAKUTEN ==========
+rakuten:
+  api:
+    key: "${RAKUTEN_API_KEY}"
+    secret: "${RAKUTEN_API_SECRET}"
+    affiliate: "${RAKUTEN_AFFILIATE_ID}"
+    apiUrl: "https://app.rakuten.co.jp/services/api/IchibaItem/Search/20220601"
+
+
+# ========== AMAZON (SerpAPI) ==========
+serpapi:
+  api:
+    key: "${SERPAPI_API_KEY}"
+
+
+# ========== EXCHANGE RATE (환율 API) ==========
+exchange:
+  api:
+    key: "${EXCHANGE_API_KEY}"
+  url:
+    live: "https://api.exchangerate.host/live"
+    convert: "https://api.exchangerate.host/convert"
+    list: "https://api.exchangerate.host/list"
+    historical: "https://api.exchangerate.host/historical"
+
+
+# ========== GOOGLE OAUTH2 ==========
+google:
+  oauth:
+    clientId: "${GOOGLE_OAUTH_CLIENT_ID}"
+    clientSecret: "${GOOGLE_OAUTH_CLIENT_SECRET}"
+    redirectUri: "http://localhost:8080/login/oauth2/code/google"
+    scope:
+      - profile
+      - email

@@ -1,0 +1,13 @@
+spring:
+  application:
+    name: ecprice-research
+
+  profiles:
+    active: local   # ← 로컬 실행 기본 프로필
+
+server:
+  port: 8080
+
+logging:
+  level:
+    root: INFO
