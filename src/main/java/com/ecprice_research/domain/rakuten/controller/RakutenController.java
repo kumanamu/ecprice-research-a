@@ -14,6 +14,6 @@ public class RakutenController {
 
     @GetMapping("/search")
     public PriceInfo search(@RequestParam String keyword) {
-        return rakutenService.search(keyword);
+        return (PriceInfo) rakutenService.search(keyword);
     }
 }

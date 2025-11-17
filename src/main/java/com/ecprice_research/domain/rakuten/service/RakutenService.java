@@ -1,7 +1,6 @@
 package com.ecprice_research.domain.rakuten.service;
 
 import com.ecprice_research.domain.margin.dto.PriceInfo;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -10,10 +9,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
 import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
 
-@Service
-@RequiredArgsConstructor
 @Slf4j
+@Service
 public class RakutenService {
 
     @Value("${rakuten.api.key}")
@@ -22,46 +22,64 @@ public class RakutenService {
     @Value("${rakuten.api.affiliate}")
     private String affiliateId;
 
-    public PriceInfo search(String keyword) {
+    public List<PriceInfo> search(String keyword) {
         try {
-            String url = "https://app.rakuten.co.jp/services/api/IchibaItem/Search/20220601"
-                    + "?applicationId=" + appId
-                    + "&keyword=" + URLEncoder.encode(keyword, "UTF-8")
-                    + "&hits=1";
+            String url =
+                    "https://app.rakuten.co.jp/services/api/IchibaItem/Search/20170706"
+                            + "?applicationId=" + appId
+                            + "&affiliateId=" + affiliateId
+                            + "&keyword=" + URLEncoder.encode(keyword, StandardCharsets.UTF_8)
+                            + "&format=json";
+
+            log.info("📡 [Rakuten API 요청] {}", url);
 
             RestTemplate rt = new RestTemplate();
             String res = rt.getForObject(url, String.class);
-
             JSONObject json = new JSONObject(res);
-            var items = json.optJSONArray("Items");
 
+            JSONArray items = json.optJSONArray("Items");
             if (items == null || items.isEmpty()) {
-                return PriceInfo.builder()
-                        .platform("RAKUTEN")
-                        .productName("NO_DATA")
-                        .currencyOriginal("JPY")
-                        .build();
+                return List.of(
+                        PriceInfo.builder()
+                                .platform("RAKUTEN")
+                                .productName("NO_DATA")
+                                .currencyOriginal("JPY")
+                                .build()
+                );
             }
 
             JSONObject item = items.getJSONObject(0).getJSONObject("Item");
 
-            return PriceInfo.builder()
+            String name = item.optString("itemName", "NO_DATA");
+            int price = item.optInt("itemPrice", 0);
+            String imgUrl = "";
+            try {
+                JSONArray images = item.optJSONArray("mediumImageUrls");
+                if (images != null && !images.isEmpty()) {
+                    imgUrl = images.getJSONObject(0).optString("imageUrl", "");
+                }
+            } catch (Exception ignored) {}
+
+            PriceInfo info = PriceInfo.builder()
                     .platform("RAKUTEN")
-                    .productName(item.optString("itemName"))
-                    .productUrl(item.optString("itemUrl"))
-                    .productImage(item.optString("mediumImageUrls").replace("[", "").replace("]", ""))
-                    .priceOriginal(item.optLong("itemPrice", 0))
-                    .shippingOriginal(0)
+                    .productName(name)
+                    .productImage(imgUrl)
+                    .productUrl(item.optString("itemUrl", ""))
+                    .priceOriginal(price)
                     .currencyOriginal("JPY")
                     .build();
 
+            return List.of(info);
+
         } catch (Exception e) {
-            log.error("Rakuten API error: {}", e.getMessage());
-            return PriceInfo.builder()
-                    .platform("RAKUTEN")
-                    .productName("ERROR")
-                    .currencyOriginal("JPY")
-                    .build();
+            log.error("❌ [Rakuten] 오류: {}", e.getMessage());
+            return List.of(
+                    PriceInfo.builder()
+                            .platform("RAKUTEN")
+                            .productName("NO_DATA")
+                            .currencyOriginal("JPY")
+                            .build()
+            );
         }
     }
 }

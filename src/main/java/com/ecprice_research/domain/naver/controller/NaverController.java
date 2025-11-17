@@ -14,6 +14,6 @@ public class NaverController {
 
     @GetMapping("/search")
     public PriceInfo search(@RequestParam String keyword) {
-        return naverService.search(keyword);
+        return (PriceInfo) naverService.search(keyword);
     }
 }

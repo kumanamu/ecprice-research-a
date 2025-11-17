@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>ECPriceResearch Test</title>
+    <style>
+        body {
+            font-family: Arial;
+            padding: 30px;
+            background: #fafafa;
+        }
+        .search-box {
+            margin-bottom: 20px;
+        }
+        input {
+            width: 300px;
+            padding: 8px;
+            font-size: 16px;
+        }
+        button {
+            padding: 8px 14px;
+            font-size: 15px;
+            margin-left: 6px;
+            cursor: pointer;
+        }
+        .toggle-btn {
+            background: #333;
+            color: white;
+            border: none;
+        }
+        h2 {
+            margin-top: 30px;
+        }
+        .platform-box {
+            margin-top: 20px;
+            padding: 15px;
+            background: white;
+            border-radius: 10px;
+            border: 1px solid #ddd;
+            display: inline-block;
+            margin-right: 20px;
+        }
+        .platform-title {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        .item-img {
+            width: 120px;
+            margin-bottom: 10px;
+            border-radius: 8px;
+        }
+        .price {
+            font-size: 18px;
+            font-weight: bold;
+            color: #e74c3c;
+            margin: 10px 0;
+        }
+        a {
+            color: #3498db;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+        .summary {
+            background: #ecf0f1;
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+
+<h1 id="title">🔦 ECPriceResearch 가격 비교 테스트</h1>
+
+<button class="toggle-btn" onclick="toggleLang()">🌍 언어 전환</button>
+
+<div class="search-box">
+    <label id="labelKeyword">검색 키워드</label><br>
+    <input id="keyword" placeholder="예: 아이폰 13">
+    <button onclick="fetchMargin()">🚀 조회</button>
+</div>
+
+<h2 id="resultTitle">결과</h2>
+<div id="result">아직 조회 안함</div>
+
+<script>
+    let lang = "ko";
+
+    const words = {
+        ko: {
+            title: "🔦 ECPriceResearch 가격 비교 테스트",
+            keywordLabel: "검색 키워드",
+            placeholder: "예: 아이폰 13",
+            search: "🚀 조회",
+            result: "결과",
+            noData: "상품 없음"
+        },
+        jp: {
+            title: "🔦 ECPriceResearch 価格比較テスト",
+            keywordLabel: "検索キーワード",
+            placeholder: "例: iPhone 13",
+            search: "🚀 検索",
+            result: "結果",
+            noData: "データなし"
+        }
+    };
+
+    function toggleLang() {
+        lang = lang === "ko" ? "jp" : "ko";
+        document.getElementById("title").textContent = words[lang].title;
+        document.getElementById("labelKeyword").textContent = words[lang].keywordLabel;
+        document.getElementById("keyword").placeholder = words[lang].placeholder;
+        document.getElementById("resultTitle").textContent = words[lang].result;
+    }
+
+    async function fetchMargin() {
+        const keyword = document.getElementById("keyword").value;
+
+        if (!keyword) {
+            alert("키워드를 입력하세요!");
+            return;
+        }
+
+        const box = document.getElementById("result");
+        box.innerHTML = "<p>⏳ 조회 중...</p>";
+
+        try {
+            const res = await fetch(`/api/margin/compare?keyword=${encodeURIComponent(keyword)}&lang=${lang}`);
+            if (!res.ok) throw new Error("API 오류: " + res.status);
+
+            const json = await res.json();
+            renderResult(json);
+
+        } catch (err) {
+            document.getElementById("result").innerHTML =
+                "<p style='color: red;'>❌ 조회 실패: " + err + "</p>";
+        }
+    }
+
+    function renderResult(data) {
+        const box = document.getElementById("result");
+        box.innerHTML = "";
+
+        if (!data) {
+            box.innerHTML = "<p>데이터 없음</p>";
+            return;
+        }
+
+        const platforms = [
+            { key: "amazonJp", name: "Amazon JP", flag: "🇯🇵" },
+            { key: "rakuten", name: "Rakuten", flag: "🇯🇵" },
+            { key: "naver", name: "Naver", flag: "🇰🇷" },
+            { key: "coupang", name: "Coupang", flag: "🇰🇷" }
+        ];
+
+        let html = "";
+
+        // 🔥 플랫폼 카드를 생성
+        platforms.forEach(platform => {
+            const item = data[platform.key];
+
+            if (!item || !item.productName) return;
+
+            const img = item.productImage || "https://via.placeholder.com/120";
+            const price =
+                item.priceKrw > 0
+                    ? item.priceKrw + " KRW"
+                    : item.priceJpy > 0
+                    ? item.priceJpy + " JPY"
+                    : "가격 없음";
+
+            html += `
+                <div class='platform-box'>
+                    <div class='platform-title'>${platform.flag} ${platform.name}</div>
+                    <img src='${img}' class='item-img'
+                         onerror="this.src='https://via.placeholder.com/120'" />
+                    <div style="font-size: 14px; margin-bottom: 10px; max-width: 200px;">
+                        ${item.productName.substring(0, 50)}...
+                    </div>
+                    <div class='price'>${price}</div>
+                    <a href='${item.productUrl}' target='_blank'>상품 보기 →</a>
+                </div>
+            `;
+        });
+
+        // 🔍 가격 요약
+        html += `
+            <div style="clear: both; margin-top: 20px;">
+                <div class='summary'>
+                    <h3>💰 가격 비교 요약</h3>
+                    <p><strong>최저가 플랫폼:</strong> ${data.bestPlatform}</p>
+                    <p><strong>환율:</strong> 1 JPY = ${data.krwToJpy.toFixed(2)} KRW</p>
+                </div>
+            </div>
+        `;
+
+        // 🤖 AI 자동 분석 결과
+        if (data.aiAnalysis) {
+            const ai = data.aiAnalysis;
+
+            html += `
+                <div style="margin-top:30px; background:#fff8e1;
+                            padding:20px; border-radius:10px; border:1px solid #e0c97f;">
+                    <h3>🤖 AI 마진 분석 결과</h3>
+
+                    <p><strong>추천 구매처:</strong> ${ai.buyRecommendation}</p>
+                    <p><strong>추천 판매처:</strong> ${ai.sellRecommendation}</p>
+
+                    <p><strong>예상 마진:</strong> ${ai.expectedProfitKrw.toLocaleString()} 원</p>
+                    <p><strong>예상 수익률:</strong> ${ai.expectedProfitRate.toFixed(2)}%</p>
+
+                    <p style="margin-top:10px;"><strong>📌 분석 이유:</strong><br>${ai.reason}</p>
+                </div>
+            `;
+        } else {
+            html += `
+                <div style="margin-top:30px; color:red;">
+                    ⚠ AI 분석 데이터를 불러오지 못했습니다.
+                </div>
+            `;
+        }
+
+        box.innerHTML = html;
+    }
+</script>
+
+</body>
+</html>

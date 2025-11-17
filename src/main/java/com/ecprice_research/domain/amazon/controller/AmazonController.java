@@ -14,6 +14,6 @@ public class AmazonController {
 
     @GetMapping("/search")
     public PriceInfo search(@RequestParam String keyword) {
-        return amazonService.search(keyword);
+        return (PriceInfo) amazonService.search(keyword);
     }
 }

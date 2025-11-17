@@ -24,3 +24,4 @@ public class PriceInfo {
     @Builder.Default
     private LocalDateTime timestamp = LocalDateTime.now(); // 수집 시각
 }
+

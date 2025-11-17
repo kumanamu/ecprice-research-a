@@ -28,12 +28,8 @@ naver:
 
 # ========== COUPANG AFFILIATE API ==========
 coupang:
-  partnerId: ${COUPANG_PARTNER_ID}
-  accessKey: ${COUPANG_ACCESS_KEY}
-  secretKey: ${COUPANG_SECRET_KEY}
-  apiUrl: "https://api-gateway.coupang.com/v2/providers/affiliate_open_api/apis/openapi/products/search"
-
-
+  accessKey: "${COUPANG_ACCESS_KEY}"
+  secretKey: "${COUPANG_SECRET_KEY}"
 # ========== RAKUTEN ==========
 rakuten:
   api:
@@ -69,3 +65,8 @@ google:
     scope:
       - profile
       - email
+
+logging:
+  level:
+    com.ecprice_research.domain.coupang.util: DEBUG
+    com.ecprice_research.domain.coupang.service: DEBUG

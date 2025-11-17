@@ -21,4 +21,7 @@ public class MarginCompareResult {
     private String bestPlatform;
     private long profitKrw;
     private double profitJpy;
+    private String lang;
+
+    private AiMarginAnalysis aiAnalysis;
 }

@@ -10,6 +10,8 @@ import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
+import java.util.List;
+
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -23,10 +25,7 @@ public class NaverService {
 
     private final RestTemplate restTemplate = new RestTemplate();
 
-    /**
-     * 네이버 쇼핑 검색
-     */
-    public PriceInfo search(String keyword) {
+    public List<PriceInfo> search(String keyword) {
 
         try {
             String url = "https://openapi.naver.com/v1/search/shop.json?query=" + keyword;
@@ -42,12 +41,12 @@ public class NaverService {
             JSONObject json = new JSONObject(resp.getBody());
             JSONArray items = json.optJSONArray("items");
             if (items == null || items.isEmpty()) {
-                return empty();
+                return List.of(empty());
             }
 
             JSONObject first = items.getJSONObject(0);
 
-            return PriceInfo.builder()
+            PriceInfo info = PriceInfo.builder()
                     .platform("NAVER")
                     .productName(first.optString("title"))
                     .productUrl(first.optString("link"))
@@ -57,9 +56,11 @@ public class NaverService {
                     .currencyOriginal("KRW")
                     .build();
 
+            return List.of(info);
+
         } catch (Exception e) {
             log.error("Naver API error: {}", e.getMessage());
-            return empty();
+            return List.of(empty());
         }
     }
 

@@ -2,15 +2,19 @@ package com.ecprice_research.domain.margin.service;
 
 import com.ecprice_research.domain.amazon.service.AmazonService;
 import com.ecprice_research.domain.coupang.service.CoupangService;
-import com.ecprice_research.domain.exchange.dto.ExchangeRate;
-import com.ecprice_research.domain.exchange.service.ExchangeService;
+import com.ecprice_research.domain.margin.dto.AiMarginAnalysis;
 import com.ecprice_research.domain.margin.dto.MarginCompareResult;
 import com.ecprice_research.domain.margin.dto.PriceInfo;
 import com.ecprice_research.domain.naver.service.NaverService;
 import com.ecprice_research.domain.rakuten.service.RakutenService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class MarginService {
@@ -19,58 +23,109 @@ public class MarginService {
     private final RakutenService rakutenService;
     private final NaverService naverService;
     private final CoupangService coupangService;
-    private final ExchangeService exchangeService;
+    private final OpenAiAnalysisService aiService;
 
-    /**
-     * 가격 전체 비교 → 최저가 / 최고마진 플랫폼 선정
-     */
-    public MarginCompareResult compareAll(String keyword) {
+    public MarginCompareResult compare(String keyword, String lang) {
 
-        PriceInfo amazon = amazonService.search(keyword);
-        PriceInfo rakuten = rakutenService.search(keyword);
-        PriceInfo naver = naverService.search(keyword);
-        PriceInfo coupang = coupangService.search(keyword);
+        // 각 서비스에서 List<PriceInfo>를 반환받고 첫 번째 상품만 추출
+        CompletableFuture<PriceInfo> amazonFuture =
+                CompletableFuture.supplyAsync(() -> {
+                    List<PriceInfo> list = amazonService.search(keyword);
+                    return (list != null && !list.isEmpty()) ? list.get(0) : createErrorPrice("AMAZON_JP");
+                });
 
-        ExchangeRate rate = exchangeService.getRate();
+        CompletableFuture<PriceInfo> rakutenFuture =
+                CompletableFuture.supplyAsync(() -> {
+                    List<PriceInfo> list = rakutenService.search(keyword);
+                    return (list != null && !list.isEmpty()) ? list.get(0) : createErrorPrice("RAKUTEN");
+                });
 
-        long jpyToKrw = rate.getJpyToKrw();
-        double krwToJpy = rate.getKrwToJpy();
+        CompletableFuture<PriceInfo> naverFuture =
+                CompletableFuture.supplyAsync(() -> {
+                    List<PriceInfo> list = naverService.search(keyword);
+                    return (list != null && !list.isEmpty()) ? list.get(0) : createErrorPrice("NAVER");
+                });
 
-        // 가격 KRW 기준 정규화
-        convertPrices(amazon, jpyToKrw);
-        convertPrices(rakuten, jpyToKrw);
-        convertPrices(naver, 1);
-        convertPrices(coupang, 1);
+        CompletableFuture<PriceInfo> coupangFuture =
+                CompletableFuture.supplyAsync(() -> {
+                    List<PriceInfo> list = coupangService.search(keyword);
+                    return (list != null && !list.isEmpty()) ? list.get(0) : createErrorPrice("COUPANG");
+                });
 
-        // 최고가 = 가장 비싼 = 가장 팔면 이익 많이남
-        PriceInfo best = amazon;
-        long profit = amazon.getPriceKrw();
+        // 모든 비동기 작업 완료 대기
+        PriceInfo amazon = amazonFuture.join();
+        PriceInfo rakuten = rakutenFuture.join();
+        PriceInfo naver = naverFuture.join();
+        PriceInfo coupang = coupangFuture.join();
 
-        if (rakuten.getPriceKrw() > profit) { best = rakuten; profit = rakuten.getPriceKrw(); }
-        if (naver.getPriceKrw() > profit)    { best = naver; profit = naver.getPriceKrw(); }
-        if (coupang.getPriceKrw() > profit)  { best = coupang; profit = coupang.getPriceKrw(); }
+        // 환율 (더미 값)
+        double krwToJpy = 0.1;
+        long jpyToKrw = 10;
 
-        return MarginCompareResult.builder()
+        // 최저가 플랫폼 찾기
+        String bestPlatform = findBestPlatform(amazon, rakuten, naver, coupang);
+        long profitKrw = findLowestPrice(amazon, rakuten, naver, coupang);
+
+        MarginCompareResult result = MarginCompareResult.builder()
                 .keyword(keyword)
+                .lang(lang)
                 .amazonJp(amazon)
                 .rakuten(rakuten)
                 .naver(naver)
                 .coupang(coupang)
                 .jpyToKrw(jpyToKrw)
                 .krwToJpy(krwToJpy)
-                .bestPlatform(best.getPlatform())
-                .profitKrw(profit)
-                .profitJpy((long) (profit * krwToJpy))
+                .bestPlatform(bestPlatform)
+                .profitKrw(profitKrw)
+                .profitJpy((long)(profitKrw * krwToJpy))
                 .build();
+
+        // 🔥 AI 분석 추가
+        AiMarginAnalysis analysis = aiService.analyze(result);
+        result.setAiAnalysis(analysis);
+
+        return result;
     }
 
-    private void convertPrices(PriceInfo p, long jpyToKrw) {
-        if (p.getCurrencyOriginal().equals("JPY")) {
-            p.setPriceKrw(p.getPriceOriginal() * jpyToKrw);
-            p.setPriceJpy(p.getPriceOriginal());
-        } else {
-            p.setPriceKrw(p.getPriceOriginal());
-            p.setPriceJpy(0);
-        }
+    /**
+     * 최저가 플랫폼 찾기
+     */
+    private String findBestPlatform(PriceInfo amazon, PriceInfo rakuten, PriceInfo naver, PriceInfo coupang) {
+        long amazonPrice = amazon.getPriceKrw() > 0 ? amazon.getPriceKrw() : Long.MAX_VALUE;
+        long rakutenPrice = rakuten.getPriceKrw() > 0 ? rakuten.getPriceKrw() : Long.MAX_VALUE;
+        long naverPrice = naver.getPriceKrw() > 0 ? naver.getPriceKrw() : Long.MAX_VALUE;
+        long coupangPrice = coupang.getPriceKrw() > 0 ? coupang.getPriceKrw() : Long.MAX_VALUE;
+
+        long min = Math.min(Math.min(amazonPrice, rakutenPrice), Math.min(naverPrice, coupangPrice));
+
+        if (min == amazonPrice) return "AMAZON_JP";
+        if (min == rakutenPrice) return "RAKUTEN";
+        if (min == naverPrice) return "NAVER";
+        if (min == coupangPrice) return "COUPANG";
+        return "NAVER";
+    }
+
+    /**
+     * 최저가 구하기 (KRW 기준)
+     */
+    private long findLowestPrice(PriceInfo amazon, PriceInfo rakuten, PriceInfo naver, PriceInfo coupang) {
+        long amazonPrice = amazon.getPriceKrw() > 0 ? amazon.getPriceKrw() : Long.MAX_VALUE;
+        long rakutenPrice = rakuten.getPriceKrw() > 0 ? rakuten.getPriceKrw() : Long.MAX_VALUE;
+        long naverPrice = naver.getPriceKrw() > 0 ? naver.getPriceKrw() : Long.MAX_VALUE;
+        long coupangPrice = coupang.getPriceKrw() > 0 ? coupang.getPriceKrw() : Long.MAX_VALUE;
+
+        return Math.min(Math.min(amazonPrice, rakutenPrice), Math.min(naverPrice, coupangPrice));
+    }
+
+    /**
+     * 에러 PriceInfo 생성
+     */
+    private PriceInfo createErrorPrice(String platform) {
+        return PriceInfo.builder()
+                .platform(platform)
+                .productName("조회 실패")
+                .currencyOriginal("KRW")
+                .priceKrw(0)
+                .build();
     }
 }

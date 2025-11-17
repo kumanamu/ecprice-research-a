@@ -10,6 +10,9 @@ import org.springframework.stereotype.Service;
 import okhttp3.*;
 import org.json.JSONObject;
 
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -21,6 +24,9 @@ public class TranslateService {
     private final OkHttpClient client = new OkHttpClient();
 
     private static final String OPENAI_URL = "https://api.openai.com/v1/chat/completions";
+
+    /** 🔥 캐싱 추가: 동일 문장 반복 번역 방지 */
+    private final Map<String, String> cache = new ConcurrentHashMap<>();
 
     /**
      * 한국어 → 일본어
@@ -36,12 +42,25 @@ public class TranslateService {
         return translate(text, "ja", "ko");
     }
 
-
     /**
-     * 범용 번역 메서드
+     * 🔥 범용 번역 API (429 방지 + 캐싱 적용)
      */
     private TranslateResponse translate(String text, String source, String target) {
+
         try {
+            String cacheKey = source + ":" + target + ":" + text;
+
+            // 1) 캐시 먼저 조회 (속도↑ 비용↓)
+            if (cache.containsKey(cacheKey)) {
+                return TranslateResponse.builder()
+                        .originalText(text)
+                        .translatedText(cache.get(cacheKey))
+                        .sourceLang(source)
+                        .targetLang(target)
+                        .build();
+            }
+
+            // 2) OpenAI 요청 구성
             JSONObject json = new JSONObject();
             json.put("model", "gpt-4o-mini");
 
@@ -76,21 +95,37 @@ public class TranslateService {
 
             Response response = client.newCall(request).execute();
 
+            // 3) 429 처리 — 재시도 금지
+            if (response.code() == 429) {
+                log.error("❌ OpenAI 429 Too Many Requests — 번역 스킵, 원문 반환");
+                return TranslateResponse.builder()
+                        .originalText(text)
+                        .translatedText(text)
+                        .sourceLang(source)
+                        .targetLang(target)
+                        .build();
+            }
+
             if (!response.isSuccessful()) {
                 throw new RuntimeException("OpenAI API Error: " + response.code());
             }
 
+            // 4) 정상 번역
             String res = response.body().string();
             JSONObject resJson = new JSONObject(res);
             String translated = resJson
                     .getJSONArray("choices")
                     .getJSONObject(0)
                     .getJSONObject("message")
-                    .getString("content");
+                    .getString("content")
+                    .trim();
+
+            // 5) 캐시에 저장
+            cache.put(cacheKey, translated);
 
             return TranslateResponse.builder()
                     .originalText(text)
-                    .translatedText(translated.trim())
+                    .translatedText(translated)
                     .sourceLang(source)
                     .targetLang(target)
                     .build();
@@ -99,10 +134,31 @@ public class TranslateService {
             log.error("Translation error: {}", e.getMessage());
             return TranslateResponse.builder()
                     .originalText(text)
-                    .translatedText("Translation failed.")
+                    .translatedText(text)  // fallback
                     .sourceLang(source)
                     .targetLang(target)
                     .build();
+        }
+    }
+
+    /**
+     * 🔥 언어 토글 기반 번역기
+     */
+    public String translateText(String text, String targetLang) {
+        try {
+            if ("ko".equalsIgnoreCase(targetLang)) {
+                return translateJaToKo(text).getTranslatedText();
+
+            } else if ("jp".equalsIgnoreCase(targetLang)) {
+                return translateKoToJa(text).getTranslatedText();
+
+            } else {
+                return text;
+            }
+
+        } catch (Exception e) {
+            log.error("TranslateText error: {}", e.getMessage());
+            return text;
         }
     }
 }
