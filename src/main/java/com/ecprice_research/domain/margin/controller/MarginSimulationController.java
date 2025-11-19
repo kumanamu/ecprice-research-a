@@ -7,13 +7,13 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@RequestMapping("/api/margin/simulation")
+@RequestMapping("/api/margin/sim")
 @RequiredArgsConstructor
 public class MarginSimulationController {
 
     private final MarginSimulationService simService;
 
-    @PostMapping
+    @PostMapping("/run")
     public MarginSimulationResult run(@RequestBody MarginSimulationRequest req) {
         return simService.simulate(req);
     }

@@ -5,17 +5,19 @@ import com.ecprice_research.domain.margin.dto.PriceInfo;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
-
 @RestController
-@RequiredArgsConstructor
 @RequestMapping("/api/coupang")
+@RequiredArgsConstructor
 public class CoupangController {
 
     private final CoupangService coupangService;
 
+    /**
+     * 🔥 쿠팡 검색 (단일 PriceInfo 반환)
+     * - 기존 List<PriceInfo> → PriceInfo 로 구조統一
+     */
     @GetMapping("/search")
-    public List<PriceInfo> search(@RequestParam String keyword) {
-        return coupangService.search(keyword);   // ← List로 반환
+    public PriceInfo search(@RequestParam String keyword) {
+        return coupangService.search(keyword);
     }
 }

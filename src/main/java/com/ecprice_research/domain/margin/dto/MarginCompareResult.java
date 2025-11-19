@@ -1,27 +1,28 @@
 package com.ecprice_research.domain.margin.dto;
 
-import com.ecprice_research.domain.margin.dto.PriceInfo;
 import lombok.Builder;
-import lombok.Data;
+import lombok.Getter;
+import lombok.Setter;
 
-@Data
+@Getter
+@Setter
 @Builder
 public class MarginCompareResult {
 
-    private String keyword;
+    private String keyword;    // 검색어
+    private String lang;       // 언어 (ko/jp)
 
     private PriceInfo amazonJp;
     private PriceInfo rakuten;
     private PriceInfo naver;
     private PriceInfo coupang;
 
-    private long jpyToKrw;
-    private double krwToJpy;
+    private double krwToJpy;   // 1 KRW → JPY
+    private long jpyToKrw;     // 1 JPY → KRW
 
-    private String bestPlatform;
-    private long profitKrw;
-    private double profitJpy;
-    private String lang;
+    private String bestPlatform; // 최저가 플랫폼
+    private long profitKrw;      // 최저가 KRW
+    private long profitJpy;      // 최저가 JPY
 
-    private AiMarginAnalysis aiAnalysis;
+    private AiMarginAnalysis aiAnalysis; // AI 분석 결과
 }

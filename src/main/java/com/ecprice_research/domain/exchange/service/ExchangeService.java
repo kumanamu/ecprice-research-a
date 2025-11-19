@@ -37,15 +37,24 @@ public class ExchangeService {
 
     private long getRate(String from, String to) {
         try {
-            String url = convertUrl +
-                    "?from=" + from + "&to=" + to + "&amount=1" +
-                    "&api_key=" + apiKey;
+            // exchangerate.host API - access_key 필수!
+            String url = "https://api.exchangerate.host/convert?from=" + from +
+                    "&to=" + to + "&amount=1" +
+                    "&access_key=" + apiKey;  // ← API 키 추가
 
-            JSONObject json = new JSONObject(restTemplate.getForObject(url, String.class));
-            return Math.round(json.optDouble("result", 0));
+            log.info("💱 환율 API 호출: {}", url);
+
+            String response = restTemplate.getForObject(url, String.class);
+            JSONObject json = new JSONObject(response);
+
+            double result = json.optDouble("result", 10);
+
+            log.info("💱 환율 조회 성공: 1 {} = {} {}", from, result, to);
+
+            return Math.round(result);
 
         } catch (Exception e) {
-            log.error("Exchange error: {}", e.getMessage());
+            log.error("❌ 환율 조회 실패: {}", e.getMessage());
             return 10;
         }
     }

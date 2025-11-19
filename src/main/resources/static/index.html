@@ -39,6 +39,8 @@
             border: 1px solid #ddd;
             display: inline-block;
             margin-right: 20px;
+            vertical-align: top;
+            width: 250px;
         }
         .platform-title {
             font-size: 18px;
@@ -69,6 +71,11 @@
             border-radius: 10px;
             margin-top: 20px;
         }
+
+        #sim-box input {
+            width: 200px;
+            margin-bottom: 5px;
+        }
     </style>
 </head>
 <body>
@@ -85,6 +92,43 @@
 
 <h2 id="resultTitle">결과</h2>
 <div id="result">아직 조회 안함</div>
+
+<!-- 🔥 시뮬레이션 UI -->
+<h2 style="margin-top:40px;">🧮 마진 시뮬레이션</h2>
+
+<div id="sim-box" style="background:#fff; padding:20px; border-radius:10px; border:1px solid #ddd; width:420px;">
+    <label>구입가 (KRW)</label><br>
+    <input id="sim-purchase-krw" type="number"><br>
+
+    <label>구입가 (JPY)</label><br>
+    <input id="sim-purchase-jpy" type="number"><br>
+
+    <label>현지 배송비 (KRW)</label><br>
+    <input id="sim-local" type="number"><br>
+
+    <label>해외 배송비 (KRW)</label><br>
+    <input id="sim-intl" type="number"><br>
+
+    <label>판매 수수료 (%)</label><br>
+    <input id="sim-fee" type="number"><br>
+
+    <label>판매가 (KRW)</label><br>
+    <input id="sim-sell-krw" type="number"><br>
+
+    <label>판매가 (JPY)</label><br>
+    <input id="sim-sell-jpy" type="number"><br>
+
+    <label>관세율 (%)</label><br>
+    <input id="sim-tax" type="number"><br>
+
+    <label>환율 (1 JPY → KRW)</label><br>
+    <input id="sim-ex" type="number"><br><br>
+
+    <button onclick="runSim()">시뮬레이션 실행</button>
+</div>
+
+<h3 style="margin-top:20px;">시뮬레이션 결과</h3>
+<div id="sim-result">아직 시뮬레이션 안함</div>
 
 <script>
     let lang = "ko";
@@ -109,121 +153,154 @@
     };
 
     function toggleLang() {
-        lang = lang === "ko" ? "jp" : "ko";
+        lang = (lang === "ko") ? "jp" : "ko";
         document.getElementById("title").textContent = words[lang].title;
         document.getElementById("labelKeyword").textContent = words[lang].keywordLabel;
         document.getElementById("keyword").placeholder = words[lang].placeholder;
         document.getElementById("resultTitle").textContent = words[lang].result;
     }
 
-    async function fetchMargin() {
-        const keyword = document.getElementById("keyword").value;
+   async function fetchMargin() {
+    const keyword = document.getElementById("keyword").value;
+    if (!keyword) return alert("키워드를 입력하세요!");
 
-        if (!keyword) {
-            alert("키워드를 입력하세요!");
-            return;
+    const box = document.getElementById("result");
+    box.innerHTML = "<p>⏳ 조회 중...</p>";
+
+    try {
+        const res = await fetch(
+            `/api/margin/compare?keyword=${encodeURIComponent(keyword)}&lang=${lang}`,
+            { method: "GET", timeout: 30000 }  // 30초 timeout
+        );
+
+        if (!res.ok) {
+            throw new Error(`API Error: ${res.status}`);
         }
 
-        const box = document.getElementById("result");
-        box.innerHTML = "<p>⏳ 조회 중...</p>";
+        const json = await res.json();
+        renderResult(json);
 
-        try {
-            const res = await fetch(`/api/margin/compare?keyword=${encodeURIComponent(keyword)}&lang=${lang}`);
-            if (!res.ok) throw new Error("API 오류: " + res.status);
-
-            const json = await res.json();
-            renderResult(json);
-
-        } catch (err) {
-            document.getElementById("result").innerHTML =
-                "<p style='color: red;'>❌ 조회 실패: " + err + "</p>";
-        }
+    } catch (e) {
+        console.error("❌ 오류:", e);
+        box.innerHTML = `<p style='color:red;'>❌ 조회 실패: ${e.message}</p>`;
     }
+}
 
     function renderResult(data) {
-        const box = document.getElementById("result");
-        box.innerHTML = "";
+    const box = document.getElementById("result");
+    box.innerHTML = "";
 
-        if (!data) {
-            box.innerHTML = "<p>데이터 없음</p>";
-            return;
+    const platforms = [
+        { key: "amazonJp", name: "Amazon JP", flag: "🇯🇵" },
+        { key: "rakuten", name: "Rakuten", flag: "🇯🇵" },
+        { key: "naver", name: "Naver", flag: "🇰🇷" },
+        { key: "coupang", name: "Coupang", flag: "🇰🇷" }
+    ];
+
+    let html = "";
+
+    platforms.forEach(p => {
+        const item = data[p.key];
+        if (!item || !item.productName) return;
+
+        // 🔥 토글에 따라 주 가격과 참고 가격 결정
+        let mainPrice, subPrice, mainCurrency, subCurrency;
+
+        if (lang === "ko") {
+            // 한글: 원화(KRW) 주 표시
+            mainPrice = item.priceKrw || (item.priceJpy * data.jpyToKrw);
+            subPrice = item.priceJpy || (item.priceKrw / data.jpyToKrw);
+            mainCurrency = "KRW";
+            subCurrency = "JPY";
+        } else {
+            // 일본어: 엔화(JPY) 주 표시
+            mainPrice = item.priceJpy || (item.priceKrw / data.jpyToKrw);
+            subPrice = item.priceKrw || (item.priceJpy * data.jpyToKrw);
+            mainCurrency = "JPY";
+            subCurrency = "KRW";
         }
 
-        const platforms = [
-            { key: "amazonJp", name: "Amazon JP", flag: "🇯🇵" },
-            { key: "rakuten", name: "Rakuten", flag: "🇯🇵" },
-            { key: "naver", name: "Naver", flag: "🇰🇷" },
-            { key: "coupang", name: "Coupang", flag: "🇰🇷" }
-        ];
-
-        let html = "";
-
-        // 🔥 플랫폼 카드를 생성
-        platforms.forEach(platform => {
-            const item = data[platform.key];
-
-            if (!item || !item.productName) return;
-
-            const img = item.productImage || "https://via.placeholder.com/120";
-            const price =
-                item.priceKrw > 0
-                    ? item.priceKrw + " KRW"
-                    : item.priceJpy > 0
-                    ? item.priceJpy + " JPY"
-                    : "가격 없음";
-
-            html += `
-                <div class='platform-box'>
-                    <div class='platform-title'>${platform.flag} ${platform.name}</div>
-                    <img src='${img}' class='item-img'
-                         onerror="this.src='https://via.placeholder.com/120'" />
-                    <div style="font-size: 14px; margin-bottom: 10px; max-width: 200px;">
-                        ${item.productName.substring(0, 50)}...
-                    </div>
-                    <div class='price'>${price}</div>
-                    <a href='${item.productUrl}' target='_blank'>상품 보기 →</a>
-                </div>
-            `;
-        });
-
-        // 🔍 가격 요약
         html += `
-            <div style="clear: both; margin-top: 20px;">
-                <div class='summary'>
-                    <h3>💰 가격 비교 요약</h3>
-                    <p><strong>최저가 플랫폼:</strong> ${data.bestPlatform}</p>
-                    <p><strong>환율:</strong> 1 JPY = ${data.krwToJpy.toFixed(2)} KRW</p>
-                </div>
+            <div class="platform-box">
+                <div class="platform-title">${p.flag} ${p.name}</div>
+                <img src="${item.productImage}" class="item-img"
+                     onerror="this.src='https://via.placeholder.com/120'"/>
+                <div>${item.productName}</div>
+                <div class="price">${Math.round(mainPrice).toLocaleString()} ${mainCurrency}</div>
+                <div style="font-size:12px; color:#666;">참고: ${Math.round(subPrice).toLocaleString()} ${subCurrency}</div>
+                <a href="${item.productUrl}" target="_blank">상품 보기 →</a>
             </div>
         `;
+    });
 
-        // 🤖 AI 자동 분석 결과
-        if (data.aiAnalysis) {
-            const ai = data.aiAnalysis;
+    html += `
+        <div style="clear:both;margin-top:20px;">
+            <div class="summary">
+                <h3>💰 가격 비교 요약</h3>
+                <p><strong>최저가 플랫폼:</strong> ${data.bestPlatform}</p>
+                <p><strong>최저가:</strong> ${
+                    lang === "ko"
+                        ? data.profitKrw.toLocaleString() + " KRW (참고: " + Math.round(data.profitJpy).toLocaleString() + " JPY)"
+                        : Math.round(data.profitJpy).toLocaleString() + " JPY (참고: " + data.profitKrw.toLocaleString() + " KRW)"
+                }</p>
+                <p><strong>환율:</strong> 1 JPY = ${data.jpyToKrw.toFixed(2)} KRW</p>
+            </div>
+        </div>
+    `;
 
-            html += `
-                <div style="margin-top:30px; background:#fff8e1;
-                            padding:20px; border-radius:10px; border:1px solid #e0c97f;">
-                    <h3>🤖 AI 마진 분석 결과</h3>
+    box.innerHTML = html;
+}
 
-                    <p><strong>추천 구매처:</strong> ${ai.buyRecommendation}</p>
-                    <p><strong>추천 판매처:</strong> ${ai.sellRecommendation}</p>
+    /** 🔥 시뮬레이션 fetch도 무한루프 방지 */
+    async function runSim() {
+        const req = {
+            purchasePriceKrw: Number(document.getElementById("sim-purchase-krw").value),
+            purchasePriceJpy: Number(document.getElementById("sim-purchase-jpy").value),
+            shippingLocal: Number(document.getElementById("sim-local").value),
+            shippingInternational: Number(document.getElementById("sim-intl").value),
+            platformFee: Number(document.getElementById("sim-fee").value) / 100,
+            sellPriceKrw: Number(document.getElementById("sim-sell-krw").value),
+            sellPriceJpy: Number(document.getElementById("sim-sell-jpy").value),
+            taxRate: Number(document.getElementById("sim-tax").value) / 100,
+            exchangeRateJpyToKrw: Number(document.getElementById("sim-ex").value)
+        };
 
-                    <p><strong>예상 마진:</strong> ${ai.expectedProfitKrw.toLocaleString()} 원</p>
-                    <p><strong>예상 수익률:</strong> ${ai.expectedProfitRate.toFixed(2)}%</p>
+        const box = document.getElementById("sim-result");
+        box.innerHTML = "<p>⏳ 계산 중...</p>";
 
-                    <p style="margin-top:10px;"><strong>📌 분석 이유:</strong><br>${ai.reason}</p>
+        try {
+            const res = await fetch("/api/margin/simulation", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify(req)
+            });
+
+            if (!res.ok) {
+                box.innerHTML = "<p style='color:red;'>❌ 오류 (API 실패)</p>";
+                return;
+            }
+
+            const json = await res.json();
+
+            box.innerHTML = `
+                <div class="summary">
+                    <p><strong>총 비용 (KRW):</strong> ${json.totalCostKrw.toLocaleString()} 원</p>
+                    <p><strong>총 비용 (JPY):</strong> ${json.totalCostJpy.toFixed(2)} 엔</p>
+
+                    <p><strong>수익 (KRW):</strong> ${json.revenueKrw.toLocaleString()} 원</p>
+                    <p><strong>수익 (JPY):</strong> ${json.revenueJpy.toFixed(2)} 엔</p>
+
+                    <p><strong>마진 (KRW):</strong> ${json.profitKrw.toLocaleString()} 원</p>
+                    <p><strong>마진 (JPY):</strong> ${json.profitJpy.toFixed(2)} 엔</p>
+
+                    <p><strong>수익률 (KRW):</strong> ${json.profitRateKrw.toFixed(2)}%</p>
+                    <p><strong>수익률 (JPY):</strong> ${json.profitRateJpy.toFixed(2)}%</p>
                 </div>
             `;
-        } else {
-            html += `
-                <div style="margin-top:30px; color:red;">
-                    ⚠ AI 분석 데이터를 불러오지 못했습니다.
-                </div>
-            `;
+        } catch (e) {
+            console.error(e);
+            box.innerHTML = "<p style='color:red;'>❌ 네트워크 오류</p>";
         }
-
-        box.innerHTML = html;
     }
 </script>
 

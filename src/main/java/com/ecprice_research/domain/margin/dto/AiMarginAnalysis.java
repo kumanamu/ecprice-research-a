@@ -6,9 +6,17 @@ import lombok.Data;
 @Data
 @Builder
 public class AiMarginAnalysis {
-    private String buyRecommendation;
-    private String sellRecommendation;
-    private long expectedProfitKrw;
-    private double expectedProfitRate;
+
+    private String buyPlatform;
+    private String sellPlatform;
+    private long profitKrw;
+    private double profitRate;
     private String reason;
+
+    public String summary() {
+        return "Buy: " + buyPlatform
+                + "\nSell: " + sellPlatform
+                + "\nProfit: " + profitKrw + " KRW (" + profitRate + "%)"
+                + "\nReason: " + reason;
+    }
 }

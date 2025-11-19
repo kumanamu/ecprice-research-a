@@ -1,22 +1,27 @@
 package com.ecprice_research.domain.coupang.service;
 
-import com.ecprice_research.domain.coupang.util.CoupangSignatureUtil;
 import com.ecprice_research.domain.margin.dto.PriceInfo;
+import com.ecprice_research.util.KeywordVariantCache;
+import com.ecprice_research.domain.translate.service.TranslateService;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.json.JSONArray;
-import org.json.JSONObject;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.*;
+import org.springframework.http.client.*;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
-import org.springframework.http.*;
 
+import java.io.IOException;
+import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
 
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class CoupangService {
 
     @Value("${coupang.accessKey}")
@@ -25,122 +30,141 @@ public class CoupangService {
     @Value("${coupang.secretKey}")
     private String secretKey;
 
-    private static final String BASE_URL = "https://api-gateway.coupang.com";
+    private final TranslateService translateService;
 
-    public List<PriceInfo> search(String keyword) {
-        List<PriceInfo> result = new ArrayList<>();
+    private static final String DOMAIN = "https://api-gateway.coupang.com";
+    private static final String PATH = "/v2/providers/affiliate_open_api/apis/openapi/v1/products/search";
+
+    private final RestTemplate restTemplate = new RestTemplate();
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
+
+
+    public PriceInfo search(String keyword) {
 
         try {
-            // URL 인코딩
-            String encoded = URLEncoder.encode(keyword, StandardCharsets.UTF_8);
+            String[] variants = buildVariants(keyword);
 
-            // HMAC 서명용 전체 경로 (Base URL 생략, 쿼리 포함)
-            String fullPath = "/v2/providers/affiliate_open_api/apis/openapi/v1/products/search?keyword=" + encoded;
+            for (String k : variants) {
 
-            // 실제 호출할 URL
-            String url = BASE_URL + fullPath;
+                log.info("🔍 [Coupang] 검색 후보: {}", k);
 
-            log.debug("Calling Coupang API: {}", url);
-            log.debug("Access Key: {}", accessKey);
+                String encodedKeyword = URLEncoder.encode(k, StandardCharsets.UTF_8);
+                String uri = PATH + "?keyword=" + encodedKeyword;
 
-            // ⭐ Timestamp를 미리 생성 (비동기 호출 시 일관성 유지)
-            String datetime = CoupangSignatureUtil.generateDateTime();
-            // HMAC 서명 생성 (datetime 명시적으로 전달)
-            String authorization = CoupangSignatureUtil.generateWithDateTime(
-                    "GET",
-                    fullPath,
-                    secretKey,
-                    accessKey,
-                    datetime
-            );
-
-            log.debug("Generated Authorization: {}", authorization);
-
-            // HTTP 헤더 설정
-            HttpHeaders headers = new HttpHeaders();
-            headers.set("Authorization", authorization);
-            headers.set("Content-Type", "application/json;charset=UTF-8");
-
-            HttpEntity<String> entity = new HttpEntity<>(headers);
-
-            // API 호출
-            RestTemplate rt = new RestTemplate();
-            ResponseEntity<String> resp = rt.exchange(url, HttpMethod.GET, entity, String.class);
-
-            // 응답 파싱
-            JSONObject json = new JSONObject(resp.getBody());
-
-            // rCode 확인
-            String rCode = json.optString("rCode");
-            if (!"0".equals(rCode)) {
-                log.warn("Coupang API Error: {}", json.optString("rMessage"));
-                result.add(
-                        PriceInfo.builder()
-                                .platform("COUPANG")
-                                .productName("API_ERROR")
-                                .currencyOriginal("KRW")
-                                .build()
+                String authorization = CoupangSignatureUtil.generate(
+                        "GET",
+                        uri,
+                        secretKey,
+                        accessKey
                 );
-                return result;
+
+                URI fullUri = URI.create(DOMAIN + uri);
+
+                HttpHeaders headers = new HttpHeaders();
+                headers.set("Authorization", authorization);
+
+                HttpEntity<Void> entity = new HttpEntity<>(headers);
+
+                ResponseEntity<String> response = restTemplate.exchange(
+                        fullUri,
+                        HttpMethod.GET,
+                        entity,
+                        String.class
+                );
+
+                return parse(response.getBody(), k);
             }
 
-            // data -> productData 배열 추출
-            JSONObject dataObj = json.optJSONObject("data");
-            if (dataObj == null) {
-                result.add(
-                        PriceInfo.builder()
-                                .platform("COUPANG")
-                                .productName("NO_DATA")
-                                .currencyOriginal("KRW")
-                                .build()
-                );
-                return result;
-            }
+            return error("NO_RESULT");
 
-            JSONArray items = dataObj.optJSONArray("productData");
+        } catch (Exception e) {
+            log.error("❌ Coupang Error", e);
+            return error("EXCEPTION");
+        }
+    }
 
-            if (items == null || items.isEmpty()) {
-                result.add(
-                        PriceInfo.builder()
-                                .platform("COUPANG")
-                                .productName("NO_DATA")
-                                .currencyOriginal("KRW")
-                                .build()
-                );
-                return result;
-            }
 
-            // 첫 번째 상품만 추출
-            JSONObject item = items.getJSONObject(0);
+    private String[] buildVariants(String keyword) {
 
-            long price = item.optLong("productPrice", 0);
+        String[] cached = KeywordVariantCache.get("CUP_" + keyword);
+        if (cached != null) {
+            log.info("🔁 [Coupang 후보 캐시 HIT] {}", Arrays.toString(cached));
+            return cached;
+        }
 
-            PriceInfo info = PriceInfo.builder()
+        List<String> list = new ArrayList<>();
+
+        boolean isEnglish = keyword.matches("^[a-zA-Z0-9\\s]+$");
+        boolean isKorean  = keyword.matches(".*[가-힣].*");
+
+        if (isEnglish) list.add(keyword);
+        else if (isKorean) list.add(keyword);
+        else list.add(translateService.jpToKo(keyword)); // 일본어 → 한국어
+
+        String[] arr = list.toArray(new String[0]);
+        KeywordVariantCache.put("CUP_" + keyword, arr);
+
+        log.info("🔍 [Coupang 검색 후보] {}", Arrays.toString(arr));
+        return arr;
+    }
+
+
+    private PriceInfo parse(String responseBody, String keyword) {
+        try {
+            JsonNode root = objectMapper.readTree(responseBody);
+
+            String rCode = root.path("rCode").asText("");
+            if (!"0".equals(rCode)) return error("API_ERROR");
+
+            JsonNode data = root.path("data").path("productData");
+            if (!data.isArray() || data.isEmpty()) return error("NO_DATA");
+
+            JsonNode item = data.get(0);
+
+            String name = item.path("productName").asText("Unknown");
+            long price = item.path("productPrice").asLong(0);
+
+            return PriceInfo.builder()
                     .platform("COUPANG")
-                    .productName(item.optString("productName"))
-                    .productUrl(item.optString("productUrl"))
-                    .productImage(item.optString("productImage"))
-                    .priceOriginal(price)
+                    .productName(name)
+                    .productUrl(item.path("productUrl").asText(""))
+                    .productImage(item.path("productImage").asText(""))
                     .priceKrw(price)
                     .currencyOriginal("KRW")
                     .build();
 
-            result.add(info);
-            log.info("✅ Coupang search successful: {} ({}원)", info.getProductName(), price);
-            return result;
-
         } catch (Exception e) {
-            log.error("❌ Coupang Search Error", e);
+            log.error("❌ Coupang Parse Error", e);
+            return error("PARSE_ERR");
+        }
+    }
 
-            result.add(
-                    PriceInfo.builder()
-                            .platform("COUPANG")
-                            .productName("ERROR")
-                            .currencyOriginal("KRW")
-                            .build()
-            );
 
-            return result;
+    private PriceInfo error(String msg) {
+        return PriceInfo.builder()
+                .platform("COUPANG")
+                .productName(msg)
+                .productUrl("")
+                .productImage("")
+                .priceKrw(0)
+                .currencyOriginal("KRW")
+                .build();
+    }
+
+
+    private static class LoggingInterceptor implements ClientHttpRequestInterceptor {
+        @Override
+        public ClientHttpResponse intercept(HttpRequest request, byte[] body, ClientHttpRequestExecution exec)
+                throws IOException {
+
+            System.out.println("=== [ACTUAL HTTP REQUEST] ===");
+            System.out.println("URI: " + request.getURI());
+            System.out.println("Method: " + request.getMethod());
+            request.getHeaders().forEach((k,v)-> System.out.println(k+"="+v));
+            System.out.println("=============================");
+
+            return exec.execute(request, body);
         }
     }
 }

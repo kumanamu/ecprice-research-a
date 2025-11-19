@@ -36,5 +36,6 @@ dependencies {
 
 	/* JSON 파싱 (org.json) */
 	implementation 'org.json:json:20231013'
+	implementation 'commons-codec:commons-codec:1.15'
 
 }

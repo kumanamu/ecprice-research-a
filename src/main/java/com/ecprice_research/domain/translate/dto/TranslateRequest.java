@@ -4,5 +4,7 @@ import lombok.Data;
 
 @Data
 public class TranslateRequest {
-    private String text; // 번역할 문장
+    private String text;
+    private String source;
+    private String target;
 }

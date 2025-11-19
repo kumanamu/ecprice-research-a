@@ -1,164 +1,104 @@
 package com.ecprice_research.domain.translate.service;
 
-import com.ecprice_research.domain.translate.dto.TranslateResponse;
+import com.ecprice_research.util.TranslateCache;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.json.JSONArray;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.*;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
 
-import okhttp3.*;
-import org.json.JSONObject;
-
+import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
-@Slf4j
+/**
+ * 번역 서비스
+ * - OpenAI API 호출 전 캐싱을 먼저 조회하여 비용 및 지연을 줄이는 구조
+ * - 운영환경에서는 반드시 필요한 성능 최적화 포인트
+ */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class TranslateService {
 
-    @Value("${openai.api.key}")
-    private String apiKey;
+    @Value("${openai.key}")
+    private String OPENAI_KEY;
 
-    private final OkHttpClient client = new OkHttpClient();
+    private final RestTemplate restTemplate = new RestTemplate();
 
-    private static final String OPENAI_URL = "https://api.openai.com/v1/chat/completions";
+    // ---------------------------------------------------------------------
+    // 🔥 안전 번역기 (어떤 언어든 → 원하는 언어로)
+    // ---------------------------------------------------------------------
+    public String safeTranslate(String text, String from, String to) {
 
-    /** 🔥 캐싱 추가: 동일 문장 반복 번역 방지 */
-    private final Map<String, String> cache = new ConcurrentHashMap<>();
+        String cacheKey = "SAFE_" + from + "_" + to + "_" + text;
 
-    /**
-     * 한국어 → 일본어
-     */
-    public TranslateResponse translateKoToJa(String text) {
-        return translate(text, "ko", "ja");
-    }
-
-    /**
-     * 일본어 → 한국어
-     */
-    public TranslateResponse translateJaToKo(String text) {
-        return translate(text, "ja", "ko");
-    }
-
-    /**
-     * 🔥 범용 번역 API (429 방지 + 캐싱 적용)
-     */
-    private TranslateResponse translate(String text, String source, String target) {
+        // 캐시 확인
+        String cached = TranslateCache.getKoToJp(cacheKey);
+        if (cached != null) return cached;
 
         try {
-            String cacheKey = source + ":" + target + ":" + text;
+            String prompt = """
+                Translate the following text precisely.
+                From: %s
+                To: %s
+                Text: %s
+            """.formatted(from, to, text);
 
-            // 1) 캐시 먼저 조회 (속도↑ 비용↓)
-            if (cache.containsKey(cacheKey)) {
-                return TranslateResponse.builder()
-                        .originalText(text)
-                        .translatedText(cache.get(cacheKey))
-                        .sourceLang(source)
-                        .targetLang(target)
-                        .build();
-            }
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("Authorization", "Bearer " + OPENAI_KEY);
+            headers.set("Content-Type", "application/json");
 
-            // 2) OpenAI 요청 구성
-            JSONObject json = new JSONObject();
-            json.put("model", "gpt-4o-mini");
-
-            JSONArray messages = new JSONArray();
-
-            JSONObject system = new JSONObject();
-            system.put("role", "system");
-            system.put("content",
-                    "You are a professional high-accuracy translation engine. "
-                            + "Translate the user's text from " + source + " to " + target
-                            + " without adding or removing meaning.");
-            messages.put(system);
-
-            JSONObject user = new JSONObject();
-            user.put("role", "user");
-            user.put("content", text);
-            messages.put(user);
-
-            json.put("messages", messages);
-
-            RequestBody body = RequestBody.create(
-                    json.toString(),
-                    MediaType.parse("application/json")
+            Map<String, Object> body = Map.of(
+                    "model", "gpt-4o-mini",
+                    "messages", List.of(
+                            Map.of("role", "user", "content", prompt)
+                    )
             );
 
-            Request request = new Request.Builder()
-                    .url(OPENAI_URL)
-                    .addHeader("Authorization", "Bearer " + apiKey)
-                    .addHeader("Content-Type", "application/json")
-                    .post(body)
-                    .build();
+            HttpEntity<Map<String, Object>> req = new HttpEntity<>(body, headers);
 
-            Response response = client.newCall(request).execute();
+            Map res = restTemplate.postForObject(
+                    "https://api.openai.com/v1/chat/completions",
+                    req,
+                    Map.class
+            );
 
-            // 3) 429 처리 — 재시도 금지
-            if (response.code() == 429) {
-                log.error("❌ OpenAI 429 Too Many Requests — 번역 스킵, 원문 반환");
-                return TranslateResponse.builder()
-                        .originalText(text)
-                        .translatedText(text)
-                        .sourceLang(source)
-                        .targetLang(target)
-                        .build();
-            }
+            List choices = (List) res.get("choices");
+            Map first = (Map) choices.get(0);
+            Map message = (Map) first.get("message");
+            String translated = (String) message.get("content");
 
-            if (!response.isSuccessful()) {
-                throw new RuntimeException("OpenAI API Error: " + response.code());
-            }
+            // 캐싱 저장
+            TranslateCache.putKoToJp(cacheKey, translated);
 
-            // 4) 정상 번역
-            String res = response.body().string();
-            JSONObject resJson = new JSONObject(res);
-            String translated = resJson
-                    .getJSONArray("choices")
-                    .getJSONObject(0)
-                    .getJSONObject("message")
-                    .getString("content")
-                    .trim();
-
-            // 5) 캐시에 저장
-            cache.put(cacheKey, translated);
-
-            return TranslateResponse.builder()
-                    .originalText(text)
-                    .translatedText(translated)
-                    .sourceLang(source)
-                    .targetLang(target)
-                    .build();
+            return translated;
 
         } catch (Exception e) {
-            log.error("Translation error: {}", e.getMessage());
-            return TranslateResponse.builder()
-                    .originalText(text)
-                    .translatedText(text)  // fallback
-                    .sourceLang(source)
-                    .targetLang(target)
-                    .build();
+            log.error("❌ safeTranslate 실패: {}", e.getMessage());
+            return text; // 실패하면 원문 유지
         }
     }
 
-    /**
-     * 🔥 언어 토글 기반 번역기
-     */
-    public String translateText(String text, String targetLang) {
-        try {
-            if ("ko".equalsIgnoreCase(targetLang)) {
-                return translateJaToKo(text).getTranslatedText();
 
-            } else if ("jp".equalsIgnoreCase(targetLang)) {
-                return translateKoToJa(text).getTranslatedText();
+    // --------------------------------------------------------------
+    // 단일언어 번역 (캐싱 있는 버전)
+    // --------------------------------------------------------------
+    public String koToJp(String text) {
+        String cached = TranslateCache.getKoToJp(text);
+        if (cached != null) return cached;
 
-            } else {
-                return text;
-            }
+        String result = safeTranslate(text, "ko", "jp");
+        TranslateCache.putKoToJp(text, result);
+        return result;
+    }
 
-        } catch (Exception e) {
-            log.error("TranslateText error: {}", e.getMessage());
-            return text;
-        }
+    public String jpToKo(String text) {
+        String cached = TranslateCache.getJpToKo(text);
+        if (cached != null) return cached;
+
+        String result = safeTranslate(text, "jp", "ko");
+        TranslateCache.putJpToKo(text, result);
+        return result;
     }
 }

@@ -12,40 +12,36 @@ spring:
       hibernate:
         format_sql: true
 
-
-# ========== OPENAI (번역 / 요약 / NLP) ==========
+# ===================== AI ======================
 openai:
   api:
     key: "${OPENAI_API_KEY}"
 
-
-# ========== NAVER SHOPPING API ==========
+# ===================== 네이버 ====================
 naver:
   client:
     id: "${NAVER_CLIENT_ID}"
     secret: "${NAVER_CLIENT_SECRET}"
 
-
-# ========== COUPANG AFFILIATE API ==========
+# ===================== 쿠팡 ======================
 coupang:
   accessKey: "${COUPANG_ACCESS_KEY}"
   secretKey: "${COUPANG_SECRET_KEY}"
-# ========== RAKUTEN ==========
+
+# ===================== 라쿠텐 ====================
 rakuten:
   api:
     key: "${RAKUTEN_API_KEY}"
-    secret: "${RAKUTEN_API_SECRET}"
+    secret: "${RAKUTEN_API_SECRET}"      # 필요 시 사용 (지금 구조에선 key만 필수)
     affiliate: "${RAKUTEN_AFFILIATE_ID}"
     apiUrl: "https://app.rakuten.co.jp/services/api/IchibaItem/Search/20220601"
 
-
-# ========== AMAZON (SerpAPI) ==========
+# ===================== 아마존(SerpAPI) ====================
 serpapi:
   api:
     key: "${SERPAPI_API_KEY}"
 
-
-# ========== EXCHANGE RATE (환율 API) ==========
+# ===================== 환율 ====================
 exchange:
   api:
     key: "${EXCHANGE_API_KEY}"
