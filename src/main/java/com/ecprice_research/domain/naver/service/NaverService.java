@@ -9,6 +9,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
+
 import java.util.*;
 
 @Slf4j
@@ -18,47 +19,52 @@ public class NaverService {
 
     private final NaverConfig config;
     private final TranslateService translateService;
-
     private final RestTemplate restTemplate = new RestTemplate();
 
+
+    // =====================================================================
+    // 🔍 메인 검색
+    // =====================================================================
     public PriceInfo search(String keyword) {
 
         try {
-            String[] variants = buildVariants(keyword);
+            List<String> variants = buildVariants(keyword);
 
             for (String k : variants) {
 
-                log.info("📡 [Naver 요청] {}", config.buildSearchUrl(k));
+                String url = config.buildSearchUrl(k);
+                log.info("📡 [Naver 요청] {}", url);
 
                 HttpHeaders headers = new HttpHeaders();
                 headers.set("X-Naver-Client-Id", config.getId());
                 headers.set("X-Naver-Client-Secret", config.getSecret());
 
-                HttpEntity<String> entity = new HttpEntity<>(headers);
-
                 ResponseEntity<Map> response = restTemplate.exchange(
-                        config.buildSearchUrl(k),
+                        url,
                         HttpMethod.GET,
-                        entity,
+                        new HttpEntity<>(headers),
                         Map.class
                 );
 
                 Map<String, Object> body = response.getBody();
                 if (body == null) continue;
 
-                List<Map<String, Object>> items = (List<Map<String, Object>>) body.get("items");
+                List<Map<String, Object>> items =
+                        (List<Map<String, Object>>) body.get("items");
+
                 if (items == null || items.isEmpty()) continue;
 
                 Map<String, Object> item = items.get(0);
 
                 long price = Long.parseLong(String.valueOf(item.get("lprice")));
-                String name = ((String) item.get("title")).replaceAll("<[^>]*>", "");
+                String name = ((String) item.get("title"))
+                        .replaceAll("<[^>]*>", "");
 
                 return PriceInfo.builder()
                         .platform("NAVER")
                         .productName(name)
-                        .productImage((String) item.get("image"))
                         .productUrl((String) item.get("link"))
+                        .productImage((String) item.get("image"))
                         .priceKrw(price)
                         .currencyOriginal("KRW")
                         .build();
@@ -73,28 +79,37 @@ public class NaverService {
     }
 
 
-    private String[] buildVariants(String keyword) {
+    // =====================================================================
+    // 🔍 검색 후보 생성 (지침 100% 적용)
+    // =====================================================================
+    private List<String> buildVariants(String keyword) {
 
-        String[] cached = KeywordVariantCache.get("NAV_" + keyword);
+        List<String> cached = KeywordVariantCache.get("NAV_" + keyword);
         if (cached != null) {
-            log.info("🔁 [Naver 후보 캐시 HIT] {}", Arrays.toString(cached));
+            log.info("🔁 [Naver 후보 캐시 HIT] {}", cached);
             return cached;
         }
 
         List<String> list = new ArrayList<>();
 
-        boolean isEnglish = keyword.matches("^[a-zA-Z0-9\\s]+$");
+        boolean isEnglish = keyword.matches("^[a-zA-Z0-9\\s\\-_.]+$");
         boolean isKorean  = keyword.matches(".*[가-힣].*");
+        boolean isJapanese = keyword.matches(".*[ぁ-んァ-ン一-龥].*");
 
+        // RULE 1: 영어 → 영어 그대로
         if (isEnglish) list.add(keyword);
+
+            // RULE 2: 한국어 → 한국어 그대로
         else if (isKorean) list.add(keyword);
-        else list.add(translateService.jpToKo(keyword)); // 일본어 → 한국어
 
-        String[] arr = list.toArray(new String[0]);
-        KeywordVariantCache.put("NAV_" + keyword, arr);
+            // RULE 3: 일본어 → 한국어로 번역
+        else if (isJapanese) list.add(translateService.jpToKo(keyword));
 
-        log.info("🔍 [Naver 검색 후보] {}", Arrays.toString(arr));
-        return arr;
+        List<String> result = KeywordVariantCache.filter(list);
+        KeywordVariantCache.put("NAV_" + keyword, result);
+
+        log.info("🔍 [Naver 최종 후보] {}", result);
+        return result;
     }
 
 

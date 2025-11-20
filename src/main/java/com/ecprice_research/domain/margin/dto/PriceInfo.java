@@ -20,6 +20,7 @@ public class PriceInfo {
 
     private long priceKrw;             // KRW 기준가격
     private long priceJpy;             // JPY 기준가격
+    private String displayPrice;
 
     @Builder.Default
     private LocalDateTime timestamp = LocalDateTime.now(); // 수집 시각

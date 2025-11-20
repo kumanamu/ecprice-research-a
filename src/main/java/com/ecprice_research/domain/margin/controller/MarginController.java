@@ -18,20 +18,6 @@ public class MarginController {
     private final MarginService marginService;
     private final MarginSimulationService simService;
 
-    // ============================================================
-    // 🔥 가격 비교 API
-    // ============================================================
-    @GetMapping("/compare")
-    public MarginCompareResult compare(
-            @RequestParam String keyword,
-            @RequestParam(defaultValue = "ko") String lang
-    ) {
-        if (keyword == null || keyword.isBlank()) {
-            throw new IllegalArgumentException("keyword must not be empty");
-        }
-
-        return marginService.compare(keyword, lang);
-    }
 
     // ============================================================
     // 🔥 마진 시뮬레이션 API

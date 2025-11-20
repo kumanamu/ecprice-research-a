@@ -1,19 +1,17 @@
 package com.ecprice_research.domain.coupang.service;
 
 import com.ecprice_research.domain.margin.dto.PriceInfo;
-import com.ecprice_research.util.KeywordVariantCache;
 import com.ecprice_research.domain.translate.service.TranslateService;
+import com.ecprice_research.util.KeywordVariantCache;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
-import org.springframework.http.client.*;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
-import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -33,47 +31,43 @@ public class CoupangService {
     private final TranslateService translateService;
 
     private static final String DOMAIN = "https://api-gateway.coupang.com";
-    private static final String PATH = "/v2/providers/affiliate_open_api/apis/openapi/v1/products/search";
+    private static final String PATH =
+            "/v2/providers/affiliate_open_api/apis/openapi/v1/products/search";
 
     private final RestTemplate restTemplate = new RestTemplate();
     private final ObjectMapper objectMapper = new ObjectMapper();
 
 
-
+    // =====================================================================
+    // 🔍 메인 검색
+    // =====================================================================
     public PriceInfo search(String keyword) {
-
         try {
-            String[] variants = buildVariants(keyword);
+
+            List<String> variants = buildVariants(keyword);
 
             for (String k : variants) {
 
                 log.info("🔍 [Coupang] 검색 후보: {}", k);
 
-                String encodedKeyword = URLEncoder.encode(k, StandardCharsets.UTF_8);
-                String uri = PATH + "?keyword=" + encodedKeyword;
+                String encoded = URLEncoder.encode(k, StandardCharsets.UTF_8);
+                String uri = PATH + "?keyword=" + encoded;
 
                 String authorization = CoupangSignatureUtil.generate(
-                        "GET",
-                        uri,
-                        secretKey,
-                        accessKey
+                        "GET", uri, secretKey, accessKey
                 );
-
-                URI fullUri = URI.create(DOMAIN + uri);
 
                 HttpHeaders headers = new HttpHeaders();
                 headers.set("Authorization", authorization);
 
-                HttpEntity<Void> entity = new HttpEntity<>(headers);
-
-                ResponseEntity<String> response = restTemplate.exchange(
-                        fullUri,
+                ResponseEntity<String> res = restTemplate.exchange(
+                        URI.create(DOMAIN + uri),
                         HttpMethod.GET,
-                        entity,
+                        new HttpEntity<>(headers),
                         String.class
                 );
 
-                return parse(response.getBody(), k);
+                return parse(res.getBody());
             }
 
             return error("NO_RESULT");
@@ -85,49 +79,58 @@ public class CoupangService {
     }
 
 
-    private String[] buildVariants(String keyword) {
+    // =====================================================================
+    // 🔍 검색 후보 생성 (지침 100% 적용)
+    // =====================================================================
+    private List<String> buildVariants(String keyword) {
 
-        String[] cached = KeywordVariantCache.get("CUP_" + keyword);
+        List<String> cached = KeywordVariantCache.get("CUP_" + keyword);
         if (cached != null) {
-            log.info("🔁 [Coupang 후보 캐시 HIT] {}", Arrays.toString(cached));
+            log.info("🔁 [Coupang 후보 캐시 HIT] {}", cached);
             return cached;
         }
 
         List<String> list = new ArrayList<>();
 
-        boolean isEnglish = keyword.matches("^[a-zA-Z0-9\\s]+$");
+        boolean isEnglish = keyword.matches("^[a-zA-Z0-9\\s\\-_.]+$");
         boolean isKorean  = keyword.matches(".*[가-힣].*");
+        boolean isJapanese = keyword.matches(".*[ぁ-んァ-ン一-龥].*");
 
+        // RULE 1: 영어 → 그대로
         if (isEnglish) list.add(keyword);
+
+            // RULE 2: 한국어 → 그대로
         else if (isKorean) list.add(keyword);
-        else list.add(translateService.jpToKo(keyword)); // 일본어 → 한국어
 
-        String[] arr = list.toArray(new String[0]);
-        KeywordVariantCache.put("CUP_" + keyword, arr);
+            // RULE 3: 일본어 → 한국어 번역
+        else if (isJapanese) list.add(translateService.jpToKo(keyword));
 
-        log.info("🔍 [Coupang 검색 후보] {}", Arrays.toString(arr));
-        return arr;
+        List<String> result = KeywordVariantCache.filter(list);
+        KeywordVariantCache.put("CUP_" + keyword, result);
+
+        log.info("🔍 [Coupang 최종 후보] {}", result);
+        return result;
     }
 
 
-    private PriceInfo parse(String responseBody, String keyword) {
+    private PriceInfo parse(String body) {
         try {
-            JsonNode root = objectMapper.readTree(responseBody);
+            JsonNode root = objectMapper.readTree(body);
 
-            String rCode = root.path("rCode").asText("");
-            if (!"0".equals(rCode)) return error("API_ERROR");
+            if (!"0".equals(root.path("rCode").asText("")))
+                return error("API_ERROR");
 
             JsonNode data = root.path("data").path("productData");
-            if (!data.isArray() || data.isEmpty()) return error("NO_DATA");
+            if (!data.isArray() || data.isEmpty())
+                return error("NO_DATA");
 
             JsonNode item = data.get(0);
 
-            String name = item.path("productName").asText("Unknown");
             long price = item.path("productPrice").asLong(0);
 
             return PriceInfo.builder()
                     .platform("COUPANG")
-                    .productName(name)
+                    .productName(item.path("productName").asText(""))
                     .productUrl(item.path("productUrl").asText(""))
                     .productImage(item.path("productImage").asText(""))
                     .priceKrw(price)
@@ -150,21 +153,5 @@ public class CoupangService {
                 .priceKrw(0)
                 .currencyOriginal("KRW")
                 .build();
-    }
-
-
-    private static class LoggingInterceptor implements ClientHttpRequestInterceptor {
-        @Override
-        public ClientHttpResponse intercept(HttpRequest request, byte[] body, ClientHttpRequestExecution exec)
-                throws IOException {
-
-            System.out.println("=== [ACTUAL HTTP REQUEST] ===");
-            System.out.println("URI: " + request.getURI());
-            System.out.println("Method: " + request.getMethod());
-            request.getHeaders().forEach((k,v)-> System.out.println(k+"="+v));
-            System.out.println("=============================");
-
-            return exec.execute(request, body);
-        }
     }
 }

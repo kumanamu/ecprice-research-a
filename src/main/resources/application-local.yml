@@ -16,6 +16,7 @@ spring:
 openai:
   api:
     key: "${OPENAI_API_KEY}"
+    model: "${OPENAI_API_MODEL}"
 
 # ===================== 네이버 ====================
 naver:

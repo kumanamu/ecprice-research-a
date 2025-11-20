@@ -8,6 +8,10 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
+
 import java.util.*;
 
 @Slf4j
@@ -17,37 +21,27 @@ public class AmazonService {
 
     private final AmazonConfig config;
     private final TranslateService translateService;
-
     private final RestTemplate restTemplate = new RestTemplate();
 
     public PriceInfo search(String keyword) {
-
         try {
-            // 1) 후보 키워드 생성
-            String[] variants = buildAmazonVariants(keyword);
+            List<String> candidates = buildVariants(keyword);
+            log.info("🔍 [Amazon 후보] {}", candidates);
 
-            // 2) 후보어 순차 검색 (캐시효과 + SerpAPI 안정성)
-            for (String k : variants) {
-
+            for (String k : candidates) {
                 if (k == null || k.isBlank()) continue;
 
-                String url = config.buildSearchUrl(k);
-                log.info("📡 [Amazon 요청] {}", url);
+                // 1) API 우선 검색
+                PriceInfo apiResult = searchApi(k);
+                if (apiResult != null && apiResult.getPriceJpy() > 0) {
+                    return apiResult;
+                }
 
-                Map<String, Object> res = restTemplate.getForObject(url, Map.class);
-                if (res == null) continue;
-
-                List<Map<String, Object>> products =
-                        (List<Map<String, Object>>) res.get("product_results");
-
-                PriceInfo p1 = extract(products);
-                if (p1 != null) return p1;
-
-                List<Map<String, Object>> organic =
-                        (List<Map<String, Object>>) res.get("organic_results");
-
-                PriceInfo p2 = extract(organic);
-                if (p2 != null) return p2;
+                // 2) API 실패 → HTML fallback
+                PriceInfo htmlResult = searchHtml(k);
+                if (htmlResult != null && htmlResult.getPriceJpy() > 0) {
+                    return htmlResult;
+                }
             }
 
             return error();
@@ -58,98 +52,156 @@ public class AmazonService {
         }
     }
 
+    // -----------------------------------------------------------
+    // 🔥 1) SerpAPI (API) 검색
+    // -----------------------------------------------------------
+    private PriceInfo searchApi(String keyword) {
+        try {
+            String url = config.buildSearchUrl(keyword);
+            log.info("📡 [Amazon API 요청] {}", url);
 
-    // ---------------------------------------------------------------------
-    // 후보 검색어 생성 (영어는 그대로 1개, 나머지는 번역 + 의미확장)
-    // ---------------------------------------------------------------------
-    private String[] buildAmazonVariants(String keyword) {
+            Map<String, Object> res = restTemplate.getForObject(url, Map.class);
+            if (res == null) return null;
 
-        // 캐시 HIT 확인
-        String[] cached = KeywordVariantCache.get("AMZ_" + keyword);
-        if (cached != null) {
-            log.info("🔁 [Amazon 후보 캐시 HIT] {}", Arrays.toString(cached));
-            return cached;
+            List<Map<String, Object>> organic = (List<Map<String, Object>>) res.get("organic_results");
+            if (organic != null) {
+                PriceInfo p = extractFromList(organic);
+                if (p != null) return p;
+            }
+
+            List<Map<String, Object>> shopping = (List<Map<String, Object>>) res.get("shopping_results");
+            if (shopping != null) {
+                PriceInfo p = extractFromList(shopping);
+                if (p != null) return p;
+            }
+
+        } catch (Exception e) {
+            log.warn("⚠ Amazon API 실패: {}", e.getMessage());
         }
-
-        List<String> list = new ArrayList<>();
-
-        boolean isEnglish = keyword.matches("^[a-zA-Z0-9\\s]+$");
-
-        if (isEnglish) {
-            list.add(keyword);
-        } else {
-            String jp = translateService.koToJp(keyword);
-            String en = translateService.jpToKo(jp); // 영어 후보 생성은 필요 없으면 제거해도 됨
-            list.add(jp);
-            if (!jp.equals(keyword)) list.add(keyword);
-        }
-
-        String[] result = list.toArray(new String[0]);
-        KeywordVariantCache.put("AMZ_" + keyword, result);
-
-        log.info("🔍 [Amazon] 검색 후보: {}", Arrays.toString(result));
-        return result;
+        return null;
     }
 
-
-    private PriceInfo extract(List<Map<String, Object>> list) {
-        if (list == null) return null;
+    private PriceInfo extractFromList(List<Map<String, Object>> list) {
+        if (list == null || list.isEmpty()) return null;
 
         for (Map<String, Object> item : list) {
 
             long price = extractPrice(item);
             if (price <= 0) continue;
 
+            log.info("✅ [Amazon API 상품 발견] {} - {} JPY",
+                    item.getOrDefault("title", "unknown"), price);
+
             return PriceInfo.builder()
                     .platform("AMAZON_JP")
-                    .productName((String) item.getOrDefault("title", "Unknown"))
-                    .productUrl((String) item.getOrDefault("link", ""))
-                    .productImage((String) item.getOrDefault("thumbnail", ""))
+                    .productName(String.valueOf(item.getOrDefault("title", "")))
+                    .productUrl(String.valueOf(item.getOrDefault("link", "")))
+                    .productImage(String.valueOf(item.getOrDefault("thumbnail", "")))
                     .priceJpy(price)
                     .currencyOriginal("JPY")
                     .build();
         }
+
         return null;
     }
 
+    private long extractPrice(Object itemObj) {
+        try {
+            if (itemObj instanceof Map<?, ?> item) {
 
-    private long extractPrice(Object obj) {
+                Object v1 = item.get("extracted_price");
+                if (v1 instanceof Number) return ((Number) v1).longValue();
 
-        if (obj instanceof Map<?, ?> map) {
-            Object x = map.get("extracted_price");
-            if (x != null) return parse(x);
+                Object v2 = item.get("price");
+                if (v2 instanceof Number) return ((Number) v2).longValue();
 
-            x = map.get("price");
-            if (x != null) return parse(x);
-
-            x = map.get("price_string");
-            if (x != null) return parse(x);
-
-            Object pr = map.get("price_range");
-            if (pr instanceof Map<?, ?> r) {
-                Object min = r.get("min_price");
-                if (min != null) return parse(min);
+                Object v3 = item.get("price_string");
+                if (v3 instanceof String s) {
+                    String num = s.replaceAll("[^0-9]", "");
+                    if (!num.isBlank()) return Long.parseLong(num);
+                }
             }
-
-            Object prices = map.get("prices");
-            if (prices instanceof List<?> list && !list.isEmpty()) {
-                return parse(list.get(0));
-            }
-        }
-
+        } catch (Exception ignored) {}
         return 0;
     }
 
-    private long parse(Object v) {
+    // -----------------------------------------------------------
+    // 🔥 2) HTML fallback 검색 (정확도 최상)
+    // -----------------------------------------------------------
+    private PriceInfo searchHtml(String keyword) {
         try {
-            if (v instanceof Number n) return n.longValue();
-            if (v instanceof String s) {
-                String num = s.replaceAll("[^0-9]", "");
-                if (!num.isBlank()) return Long.parseLong(num);
+            String url = "https://www.amazon.co.jp/s?k=" + keyword;
+            log.info("🌐 [Amazon HTML 요청] {}", url);
+
+            Document doc = Jsoup.connect(url)
+                    .timeout(8000)
+                    .userAgent("Mozilla/5.0")
+                    .get();
+
+            // Amazon 검색 결과 슬롯
+            for (Element item : doc.select(".s-main-slot .s-result-item")) {
+
+                // 가격
+                String priceStr = item.select(".a-price .a-offscreen").text();
+                if (priceStr == null || priceStr.isBlank()) continue;
+
+                String num = priceStr.replaceAll("[^0-9]", "");
+                if (num.isBlank()) continue;
+
+                long price = Long.parseLong(num);
+
+                // 상품명
+                String title = item.select("h2 a.a-link-normal").text();
+                if (title.isBlank()) continue;
+
+                // URL
+                String link = "https://amazon.co.jp" + item.select("h2 a").attr("href");
+
+                // 이미지
+                String img = item.select("img.s-image").attr("src");
+
+                log.info("🟢 [Amazon HTML 상품 발견] {} - {} JPY", title, price);
+
+                return PriceInfo.builder()
+                        .platform("AMAZON_JP")
+                        .productName(title)
+                        .productUrl(link)
+                        .productImage(img)
+                        .priceJpy(price)
+                        .currencyOriginal("JPY")
+                        .build();
             }
-            if (v instanceof Map<?, ?> m) return parse(m.get("value"));
-        } catch (Exception ignore) {}
-        return 0;
+
+        } catch (Exception e) {
+            log.warn("⚠ Amazon HTML 파싱 실패: {}", e.getMessage());
+        }
+
+        return null;
+    }
+
+    // -----------------------------------------------------------
+    // 🔥 검색 후보 생성 (지침 유지)
+    // -----------------------------------------------------------
+    private List<String> buildVariants(String keyword) {
+
+        List<String> cached = KeywordVariantCache.get("AMZ_" + keyword);
+        if (cached != null) return cached;
+
+        List<String> list = new ArrayList<>();
+
+        boolean isEng = keyword.matches("^[a-zA-Z0-9\\s]+$");
+        boolean isKor = keyword.matches(".*[가-힣].*");
+        boolean isJap = keyword.matches(".*[ぁ-んァ-ン一-龥].*");
+
+        if (isEng) list.add(keyword);
+        else if (isKor) {
+            list.add(translateService.koToJp(keyword));
+            list.add(keyword);
+        }
+        else if (isJap) list.add(keyword);
+
+        KeywordVariantCache.put("AMZ_" + keyword, list);
+        return list;
     }
 
     private PriceInfo error() {

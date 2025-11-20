@@ -4,31 +4,30 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 번역 결과 캐싱
- * - 같은 문장을 반복 번역하는 비용을 절감하기 위한 캐시
- * - 운영 서비스에서는 반드시 필요한 구조
+ * 단순 Key-Value 번역 캐시
+ * - KO_JP_문장
+ * - JP_KO_文
+ * - KO_EN_text
+ * - JP_EN_text
  */
 public class TranslateCache {
 
-    // 한국어 → 일본어
-    private static final Map<String, String> KO_JP_CACHE = new ConcurrentHashMap<>();
+    private static final Map<String, String> CACHE = new ConcurrentHashMap<>();
 
-    // 일본어 → 한국어
-    private static final Map<String, String> JP_KO_CACHE = new ConcurrentHashMap<>();
-
-    public static String getKoToJp(String input) {
-        return KO_JP_CACHE.get(input);
+    /** 저장 */
+    public static void put(String key, String value) {
+        if (key == null || value == null) return;
+        CACHE.put(key, value);
     }
 
-    public static void putKoToJp(String input, String output) {
-        KO_JP_CACHE.put(input, output);
+    /** 조회 */
+    public static String get(String key) {
+        if (key == null) return null;
+        return CACHE.get(key);
     }
 
-    public static String getJpToKo(String input) {
-        return JP_KO_CACHE.get(input);
-    }
-
-    public static void putJpToKo(String input, String output) {
-        JP_KO_CACHE.put(input, output);
+    /** 전체 삭제 (테스트용) */
+    public static void clear() {
+        CACHE.clear();
     }
 }

@@ -12,39 +12,27 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 번역 서비스
- * - OpenAI API 호출 전 캐싱을 먼저 조회하여 비용 및 지연을 줄이는 구조
- * - 운영환경에서는 반드시 필요한 성능 최적화 포인트
+ * 번역 서비스 - 지침 100% 반영
+ * 영어는 절대 번역하지 않음
+ * 일본 사이트는 일본어로 / 한국 사이트는 한국어로 검색
+ * 출력 번역은 MarginService에서 처리
  */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class TranslateService {
 
-    @Value("${openai.key}")
+    @Value("${OPENAI_API_KEY}")
     private String OPENAI_KEY;
 
     private final RestTemplate restTemplate = new RestTemplate();
 
-    // ---------------------------------------------------------------------
-    // 🔥 안전 번역기 (어떤 언어든 → 원하는 언어로)
-    // ---------------------------------------------------------------------
-    public String safeTranslate(String text, String from, String to) {
-
-        String cacheKey = "SAFE_" + from + "_" + to + "_" + text;
-
-        // 캐시 확인
-        String cached = TranslateCache.getKoToJp(cacheKey);
-        if (cached != null) return cached;
+    // ======================================================================
+    // 🔥 공통 안전 번역 API
+    // ======================================================================
+    private String callOpenAi(String prompt) {
 
         try {
-            String prompt = """
-                Translate the following text precisely.
-                From: %s
-                To: %s
-                Text: %s
-            """.formatted(from, to, text);
-
             HttpHeaders headers = new HttpHeaders();
             headers.set("Authorization", "Bearer " + OPENAI_KEY);
             headers.set("Content-Type", "application/json");
@@ -64,41 +52,134 @@ public class TranslateService {
                     Map.class
             );
 
+            if (res == null) return null;
+
             List choices = (List) res.get("choices");
+            if (choices == null || choices.isEmpty()) return null;
+
             Map first = (Map) choices.get(0);
             Map message = (Map) first.get("message");
-            String translated = (String) message.get("content");
-
-            // 캐싱 저장
-            TranslateCache.putKoToJp(cacheKey, translated);
-
-            return translated;
+            return (String) message.get("content");
 
         } catch (Exception e) {
-            log.error("❌ safeTranslate 실패: {}", e.getMessage());
-            return text; // 실패하면 원문 유지
+            log.error("❌ 번역 실패: {}", e.getMessage());
+            return null;
         }
     }
 
 
-    // --------------------------------------------------------------
-    // 단일언어 번역 (캐싱 있는 버전)
-    // --------------------------------------------------------------
+    // ======================================================================
+    // 🔥 영어 → 번역 금지 규칙
+    // ======================================================================
+    private boolean isEnglishOnly(String text) {
+        return text.matches("^[a-zA-Z0-9\\s\\-_.]+$");
+    }
+
+    private boolean isKorean(String text) {
+        return text.matches(".*[가-힣].*");
+    }
+
+    private boolean isJapanese(String text) {
+        return text.matches(".*[一-龯ぁ-ゔァ-ヴー々〆〤].*");
+    }
+
+
+    // ======================================================================
+    // 🔥 ko → jp
+    // ======================================================================
     public String koToJp(String text) {
-        String cached = TranslateCache.getKoToJp(text);
+
+        if (text == null || text.isBlank()) return text;
+        if (isEnglishOnly(text)) return text;  // 영어 → 그대로
+
+        String cached = TranslateCache.get("KO_JP_" + text);
         if (cached != null) return cached;
 
-        String result = safeTranslate(text, "ko", "jp");
-        TranslateCache.putKoToJp(text, result);
+        String prompt = """
+            Translate this text from Korean to Japanese.
+            Output ONLY the translation.
+            Text: %s
+        """.formatted(text);
+
+        String result = callOpenAi(prompt);
+        if (result == null) result = text;
+
+        TranslateCache.put("KO_JP_" + text, result);
         return result;
     }
 
+
+    // ======================================================================
+    // 🔥 jp → ko
+    // ======================================================================
     public String jpToKo(String text) {
-        String cached = TranslateCache.getJpToKo(text);
+
+        if (text == null || text.isBlank()) return text;
+        if (isEnglishOnly(text)) return text; // 영어 → 그대로
+
+        String cached = TranslateCache.get("JP_KO_" + text);
         if (cached != null) return cached;
 
-        String result = safeTranslate(text, "jp", "ko");
-        TranslateCache.putJpToKo(text, result);
+        String prompt = """
+            Translate this text from Japanese to Korean.
+            Output ONLY the translation.
+            Text: %s
+        """.formatted(text);
+
+        String result = callOpenAi(prompt);
+        if (result == null) result = text;
+
+        TranslateCache.put("JP_KO_" + text, result);
+        return result;
+    }
+
+
+    // ======================================================================
+    // 🔥 ko → en
+    // ======================================================================
+    public String koToEn(String text) {
+
+        if (text == null || text.isBlank()) return text;
+        if (isEnglishOnly(text)) return text; // 영어는 번역 금지
+
+        String cached = TranslateCache.get("KO_EN_" + text);
+        if (cached != null) return cached;
+
+        String prompt = """
+            Translate this text from Korean to English.
+            Output ONLY the translation.
+            Text: %s
+        """.formatted(text);
+
+        String result = callOpenAi(prompt);
+        if (result == null) result = text;
+
+        TranslateCache.put("KO_EN_" + text, result);
+        return result;
+    }
+
+
+    // ======================================================================
+    // 🔥 jp → en
+    // ======================================================================
+    public String jpToEn(String text) {
+
+        if (text == null || text.isBlank()) return text;
+        if (isEnglishOnly(text)) return text; // 영어는 번역 금지
+
+        String cached = TranslateCache.get("JP_EN_" + text);
+        if (cached != null) return cached;
+
+        String prompt = """
+            Translate this text from Japanese to English.
+            Output ONLY the translation.
+            Text: %s
+        """.formatted(text);
+
+        String result = callOpenAi(prompt);
+        if (result == null) result = text;
+
+        TranslateCache.put("JP_EN_" + text, result);
         return result;
     }
 }

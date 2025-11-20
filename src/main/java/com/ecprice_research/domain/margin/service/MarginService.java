@@ -10,13 +10,13 @@ import com.ecprice_research.domain.margin.dto.PriceInfo;
 import com.ecprice_research.domain.naver.service.NaverService;
 import com.ecprice_research.domain.rakuten.service.RakutenService;
 import com.ecprice_research.domain.translate.service.TranslateService;
-import com.ecprice_research.util.KeywordVariantCache;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.*;
+import java.util.function.Function;
 
 @Slf4j
 @Service
@@ -27,6 +27,7 @@ public class MarginService {
     private final RakutenService rakutenService;
     private final NaverService naverService;
     private final CoupangService coupangService;
+
     private final OpenAiAnalysisService aiService;
     private final TranslateService translateService;
     private final ExchangeService exchangeService;
@@ -34,234 +35,156 @@ public class MarginService {
     private final ExecutorService executor = Executors.newFixedThreadPool(10);
     private static final int TIMEOUT_SEC = 25;
 
-
     // =====================================================================
-    // 🔥 메인 비교 로직
+    // 🔥 메인 비교 엔트리포인트
     // =====================================================================
     public MarginCompareResult compare(String keyword, String lang) {
 
         log.info("🔍 Margin Compare 실행: keyword={}, lang={}", keyword, lang);
 
-        // ───────────────────────────────
-        // 🔥 Step 1)  영어 여부 체크
-        // ───────────────────────────────
-        boolean isEnglishOnly = keyword.matches("^[a-zA-Z0-9\\s\\-_.]+$");
+        boolean isEnglish = keyword.matches("^[a-zA-Z0-9\\s\\-_.]+$");
 
-        List<String> candidatesAmazon;
-        List<String> candidatesRakuten;
-        List<String> candidatesNaver;
-        List<String> candidatesCoupang;
+        // =====================================================================
+        // 🔥 STEP 1 — 검색 후보 생성
+        // =====================================================================
+        List<String> amazonCandidates;
+        List<String> rakutenCandidates;
+        List<String> naverCandidates;
+        List<String> coupangCandidates;
 
-        // ───────────────────────────────
-        // 🔥 Step 2) 검색 후보 생성
-        // ───────────────────────────────
-        if (isEnglishOnly) {
-
-            // 영어 → 모든 플랫폼 "그대로 검색"
-            candidatesAmazon = List.of(keyword);
-            candidatesRakuten = List.of(keyword);
-            candidatesNaver = List.of(keyword);
-            candidatesCoupang = List.of(keyword);
+        if (isEnglish) {
+            amazonCandidates = List.of(keyword);
+            rakutenCandidates = List.of(keyword);
+            naverCandidates = List.of(keyword);
+            coupangCandidates = List.of(keyword);
 
         } else if (lang.equals("ko")) {
-
-            // 한국어 토글
-
-            // 아마존 / 라쿠텐 → 일본어로 번역
             String jp = translateService.koToJp(keyword);
 
-            candidatesAmazon = KeywordVariantCache.buildCandidates(keyword, "ko", translateService);
-            candidatesRakuten = List.of(jp);
-
-            // 네이버 / 쿠팡 → 한국어 그대로
-            candidatesNaver = List.of(keyword);
-            candidatesCoupang = List.of(keyword);
+            amazonCandidates = List.of(jp, keyword);
+            rakutenCandidates = List.of(jp);
+            naverCandidates = List.of(keyword);
+            coupangCandidates = List.of(keyword);
 
         } else {
-
-            // 일본어 토글
-
-            // 네이버 / 쿠팡 → 한국어로 번역
             String ko = translateService.jpToKo(keyword);
 
-            candidatesAmazon = KeywordVariantCache.bu(keyword, "jp", translateService);
-            candidatesRakuten = List.of(keyword);
-            candidatesNaver = List.of(ko);
-            candidatesCoupang = List.of(ko);
+            amazonCandidates = List.of(keyword);
+            rakutenCandidates = List.of(keyword);
+            naverCandidates = List.of(ko);
+            coupangCandidates = List.of(ko);
         }
 
-        // 로그 출력
-        log.info("🔍 [Amazon] 검색 후보: {}", candidatesAmazon);
-        log.info("🔍 [Rakuten] 검색 후보: {}", candidatesRakuten);
-        log.info("🔍 [Naver] 검색 후보: {}", candidatesNaver);
-        log.info("🔍 [Coupang] 검색 후보: {}", candidatesCoupang);
+        // =====================================================================
+        // 🔥 STEP 2 — 병렬 검색 수행
+        // =====================================================================
+        Map<String, PriceInfo> prices = new LinkedHashMap<>();
+        prices.put("amazonJp", runCandidates("AMAZON_JP", amazonCandidates, amazonService::search).join());
+        prices.put("rakuten", runCandidates("RAKUTEN", rakutenCandidates, rakutenService::search).join());
+        prices.put("naver", runCandidates("NAVER", naverCandidates, naverService::search).join());
+        prices.put("coupang", runCandidates("COUPANG", coupangCandidates, coupangService::search).join());
+
+        // =====================================================================
+        // 🔥 STEP 3 — 환율
+        // =====================================================================
+        ExchangeRate rate = exchangeService.getRate();
+        long jpyToKrw = rate.getJpyToKrw();
+        double krwToJpy = rate.getKrwToJpy();
 
 
         // =====================================================================
-        // 🔥 Step 3) 병렬 검색
+        // 🔥 STEP 4 — 최저가 분석
         // =====================================================================
-        CompletableFuture<PriceInfo> amazonFuture =
-                runCandidates("AMAZON_JP", candidatesAmazon, amazonService::search);
+        PriceInfo best = prices.values().stream()
+                .filter(pi -> pi != null && pi.getPriceKrw() > 0)
+                .min(Comparator.comparingLong(PriceInfo::getPriceKrw))
+                .orElse(null);
 
-        CompletableFuture<PriceInfo> rakutenFuture =
-                runCandidates("RAKUTEN", candidatesRakuten, rakutenService::search);
-
-        CompletableFuture<PriceInfo> naverFuture =
-                runCandidates("NAVER", candidatesNaver, naverService::search);
-
-        CompletableFuture<PriceInfo> coupangFuture =
-                runCandidates("COUPANG", candidatesCoupang, coupangService::search);
-
-        PriceInfo amazon = amazonFuture.join();
-        PriceInfo rakuten = rakutenFuture.join();
-        PriceInfo naver = naverFuture.join();
-        PriceInfo coupang = coupangFuture.join();
-
+        String bestPlatform = (best != null) ? best.getPlatform() : "-";
+        long minKrw = (best != null) ? best.getPriceKrw() : 0;
+        long minJpy = (long) (minKrw * krwToJpy);
 
         // =====================================================================
-        // 🔥 Step 4) 환율 호출
-        // =====================================================================
-        ExchangeRate exchangeRate = exchangeService.getRate();
-        double krwToJpy = exchangeRate.getKrwToJpy();
-        long jpyToKrw = exchangeRate.getJpyToKrw();
-
-        log.info("💱 실시간 환율: 1 JPY = {} KRW, 1 KRW = {} JPY", jpyToKrw, krwToJpy);
-
-
-        // =====================================================================
-        // 🔥 Step 5) 최저가 판단
-        // =====================================================================
-        String best = findBestPlatform(amazon, rakuten, naver, coupang);
-        long lowest = findLowestPrice(amazon, rakuten, naver, coupang);
-
-
-        // =====================================================================
-        // 🔥 Step 6) 결과 생성
+        // 🔥 STEP 5 — 결과 생성
         // =====================================================================
         MarginCompareResult result = MarginCompareResult.builder()
                 .keyword(keyword)
                 .lang(lang)
-                .amazonJp(amazon)
-                .rakuten(rakuten)
-                .naver(naver)
-                .coupang(coupang)
-                .bestPlatform(best)
-                .profitKrw(lowest)
-                .profitJpy((long) (lowest * krwToJpy))
-                .krwToJpy(krwToJpy)
-                .jpyToKrw(jpyToKrw)
+                .platformPrices(prices)
+                .bestPlatform(bestPlatform)
+                .profitKrw(minKrw)
+                .profitJpy(minJpy)
+                .jpyToKrw((double) jpyToKrw)
+                .aiAnalysis(null)
                 .build();
 
-
         // =====================================================================
-        // 🔥 Step 7) AI 분석 (이미 안정화됨)
+        // 🔥 STEP 6 — AI 분석
         // =====================================================================
         try {
             AiMarginAnalysis analysis = aiService.analyze(result);
             result.setAiAnalysis(analysis);
-
-            if (analysis != null) {
-                log.info("🤖 AI Margin 분석 요약: {}", analysis.summary());
-            }
         } catch (Exception e) {
             log.error("❌ AI 분석 실패: {}", e.getMessage());
         }
 
-
         // =====================================================================
-        // 🔥 Step 8) 출력 번역 (토글 규칙)
+        // 🔥 STEP 7 — 출력 번역
         // =====================================================================
-        try {
-            applyOutputTranslation(result, lang, isEnglishOnly);
-
-        } catch (Exception e) {
-            log.error("❌ 결과 번역 실패: {}", e.getMessage());
-        }
-
+        applyOutputTranslation(result, lang, isEnglish);
 
         return result;
     }
 
-
     // =====================================================================
-    // 🔥 플랫폼별 후보 리스트를 순회하며 처음 성공한 값 반환
+    // 🔥 후보 검색 실행
     // =====================================================================
     private CompletableFuture<PriceInfo> runCandidates(
             String platform,
             List<String> candidates,
-            java.util.function.Function<String, PriceInfo> searchFn
+            Function<String, PriceInfo> searchFn
     ) {
         return CompletableFuture.supplyAsync(() -> {
-
-            for (String k : candidates) {
+            for (String c : candidates) {
                 try {
-                    PriceInfo pi = searchFn.apply(k);
+                    PriceInfo pi = searchFn.apply(c);
                     if (pi != null && pi.getPriceKrw() > 0) return pi;
-                } catch (Exception ignored) {}
+                } catch (Exception ignore) {}
             }
-
             return error(platform);
-
         }, executor).completeOnTimeout(error(platform), TIMEOUT_SEC, TimeUnit.SECONDS);
     }
 
-
     // =====================================================================
-    // 🔥 출력 번역 규칙
+    // 🔥 번역 / 출력 규칙
     // =====================================================================
-    private void applyOutputTranslation(MarginCompareResult r, String lang, boolean englishInput) {
-
-        if (englishInput) {
-            if (lang.equals("ko")) {
-                translateToKo(r);
-            } else if (lang.equals("jp")) {
-                translateToJp(r);
-            }
+    private void applyOutputTranslation(MarginCompareResult r, String lang, boolean english) {
+        if (english) {
+            if (lang.equals("ko")) translateToKo(r);
+            else translateToJp(r);
             return;
         }
 
-        if (lang.equals("ko")) {
-            translateToKo(r);
-        } else if (lang.equals("jp")) {
-            translateToJp(r);
-        }
+        if (lang.equals("ko")) translateToKo(r);
+        else translateToJp(r);
     }
 
     private void translateToKo(MarginCompareResult r) {
-        r.getAmazonJp().setProductName(translateService.jpToKo(r.getAmazonJp().getProductName()));
-        r.getRakuten().setProductName(translateService.jpToKo(r.getRakuten().getProductName()));
+        r.getPlatformPrices().values().forEach(pi -> {
+            if (pi != null && pi.getProductName() != null)
+                pi.setProductName(translateService.jpToKo(pi.getProductName()));
+        });
     }
 
     private void translateToJp(MarginCompareResult r) {
-        r.getNaver().setProductName(translateService.koToJp(r.getNaver().getProductName()));
-        r.getCoupang().setProductName(translateService.koToJp(r.getCoupang().getProductName()));
+        r.getPlatformPrices().values().forEach(pi -> {
+            if (pi != null && pi.getProductName() != null)
+                pi.setProductName(translateService.koToJp(pi.getProductName()));
+        });
     }
-
 
     // =====================================================================
-    // 🔥 최저가 계산
-    // =====================================================================
-    private long p(PriceInfo x) {
-        return (x != null && x.getPriceKrw() > 0) ? x.getPriceKrw() : Long.MAX_VALUE;
-    }
-
-    private String findBestPlatform(PriceInfo a, PriceInfo r, PriceInfo n, PriceInfo c) {
-        long aa = p(a), rr = p(r), nn = p(n), cc = p(c);
-        long min = Math.min(Math.min(aa, rr), Math.min(nn, cc));
-
-        if (min == aa) return "AMAZON_JP";
-        if (min == rr) return "RAKUTEN";
-        if (min == nn) return "NAVER";
-        return "COUPANG";
-    }
-
-    private long findLowestPrice(PriceInfo a, PriceInfo r, PriceInfo n, PriceInfo c) {
-        return Math.min(Math.min(p(a), p(r)), Math.min(p(n), p(c)));
-    }
-
-
-    // =====================================================================
-    // 🔥 공통 에러 응답
+    // 🔥 에러 PriceInfo
     // =====================================================================
     private PriceInfo error(String platform) {
         return PriceInfo.builder()
@@ -269,8 +192,9 @@ public class MarginService {
                 .productName("조회 실패")
                 .productUrl("")
                 .productImage("")
-                .priceKrw(0)
                 .currencyOriginal("KRW")
+                .priceKrw(0)
+                .priceJpy(0)
                 .build();
     }
 }
