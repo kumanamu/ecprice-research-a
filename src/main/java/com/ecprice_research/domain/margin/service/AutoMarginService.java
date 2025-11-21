@@ -1,35 +1,36 @@
 package com.ecprice_research.domain.margin.service;
 
-import com.ecprice_research.domain.margin.dto.MarginSimulationRequest;
-import com.ecprice_research.domain.margin.dto.MarginSimulationResult;
-import com.ecprice_research.domain.margin.dto.CompareResultDto;
-import lombok.RequiredArgsConstructor;
+import com.ecprice_research.domain.margin.dto.AutoMarginResponse;
+import com.ecprice_research.domain.margin.dto.MarginCompareResult;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+@Slf4j
 @Service
-@RequiredArgsConstructor
 public class AutoMarginService {
 
-    private final MarginSimulationService sim;
+    public AutoMarginResponse compute(MarginCompareResult result) {
 
-    public CompareResultDto attachAutoMargin(CompareResultDto raw) {
+        if (result.getProfitKrw() <= 0) {
+            return AutoMarginResponse.builder()
+                    .autoBuyPrice(0)
+                    .autoSellPrice(0)
+                    .autoProfit(0)
+                    .autoProfitRate(0)
+                    .aiStrategy("수익이 발생하지 않아 자동 추천 불가")
+                    .build();
+        }
 
-        // 최저가 KRW 찾기
-        double purchase = Math.min(
-                Math.min(raw.getAmazonJp().getPriceKrw(), raw.getRakuten().getPriceKrw()),
-                Math.min(raw.getNaver().getPriceKrw(), raw.getCoupang().getPriceKrw())
-        );
+        long buy = result.getProfitKrw();
+        long sell = (long) (buy * 1.25);     // 기본 판매가: 매입 대비 25% 증가
+        long profit = sell - buy;
+        double profitRate = (double) profit / buy * 100;
 
-        MarginSimulationRequest req = new MarginSimulationRequest();
-        req.setPurchasePriceKrw((long) purchase);             // 🔥 캐스팅
-        req.setSellPriceKrw((long) (purchase * 1.3));         // 🔥 캐스팅
-        req.setExchangeRateJpyToKrw(raw.getJpyToKrw());
-
-        var result = sim.simulate(req);
-
-        raw.setProfitKrw(result.getProfitKrw());
-        raw.setProfitJpy(result.getProfitJpy());
-
-        return raw;
+        return AutoMarginResponse.builder()
+                .autoBuyPrice(buy)
+                .autoSellPrice(sell)
+                .autoProfit(profit)
+                .autoProfitRate(profitRate)
+                .build();
     }
 }

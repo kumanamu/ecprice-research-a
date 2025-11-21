@@ -1,28 +1,43 @@
 package com.ecprice_research.domain.margin.dto;
 
-import lombok.Builder;
-import lombok.Data;
-import java.time.LocalDateTime;
+import lombok.*;
 
-@Data
+@Getter @Setter
+@NoArgsConstructor @AllArgsConstructor
 @Builder
 public class PriceInfo {
 
-    private String platform;           // AMAZON_JP, RAKUTEN, NAVER, COUPANG
-
+    private String platform;
     private String productName;
     private String productUrl;
     private String productImage;
 
-    private long priceOriginal;        // 원본 가격 (JPY or KRW)
-    private long shippingOriginal;     // 원본 배송비
-    private String currencyOriginal;   // "JPY" or "KRW"
+    private Integer priceOriginal;   // null 허용
+    private Integer shippingOriginal;
 
-    private long priceKrw;             // KRW 기준가격
-    private long priceJpy;             // JPY 기준가격
+    private String currencyOriginal;
+
+    private Integer priceKrw;
+    private Integer priceJpy;
     private String displayPrice;
 
-    @Builder.Default
-    private LocalDateTime timestamp = LocalDateTime.now(); // 수집 시각
-}
+    private String status; // SUCCESS / NOT_FOUND
+    private String reason;
 
+    private String country;
+    private java.time.LocalDateTime timestamp;
+
+    public static PriceInfo notFound(String platform, String reason) {
+        return PriceInfo.builder()
+                .platform(platform)
+                .status("NOT_FOUND")
+                .priceOriginal(null)
+                .shippingOriginal(null)
+                .priceKrw(null)
+                .priceJpy(null)
+                .displayPrice("검색 결과 없음")
+                .reason(reason)
+                .timestamp(java.time.LocalDateTime.now())
+                .build();
+    }
+}

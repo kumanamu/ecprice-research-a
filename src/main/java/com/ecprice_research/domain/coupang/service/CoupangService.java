@@ -80,7 +80,7 @@ public class CoupangService {
 
 
     // =====================================================================
-    // 🔍 검색 후보 생성 (지침 100% 적용)
+    // 후보 생성
     // =====================================================================
     private List<String> buildVariants(String keyword) {
 
@@ -93,16 +93,11 @@ public class CoupangService {
         List<String> list = new ArrayList<>();
 
         boolean isEnglish = keyword.matches("^[a-zA-Z0-9\\s\\-_.]+$");
-        boolean isKorean  = keyword.matches(".*[가-힣].*");
+        boolean isKorean = keyword.matches(".*[가-힣].*");
         boolean isJapanese = keyword.matches(".*[ぁ-んァ-ン一-龥].*");
 
-        // RULE 1: 영어 → 그대로
         if (isEnglish) list.add(keyword);
-
-            // RULE 2: 한국어 → 그대로
         else if (isKorean) list.add(keyword);
-
-            // RULE 3: 일본어 → 한국어 번역
         else if (isJapanese) list.add(translateService.jpToKo(keyword));
 
         List<String> result = KeywordVariantCache.filter(list);
@@ -133,7 +128,8 @@ public class CoupangService {
                     .productName(item.path("productName").asText(""))
                     .productUrl(item.path("productUrl").asText(""))
                     .productImage(item.path("productImage").asText(""))
-                    .priceKrw(price)
+                    .priceOriginal((int) price)
+                    .shippingOriginal(0)
                     .currencyOriginal("KRW")
                     .build();
 
@@ -150,7 +146,8 @@ public class CoupangService {
                 .productName(msg)
                 .productUrl("")
                 .productImage("")
-                .priceKrw(0)
+                .priceOriginal(0)
+                .shippingOriginal(0)
                 .currencyOriginal("KRW")
                 .build();
     }

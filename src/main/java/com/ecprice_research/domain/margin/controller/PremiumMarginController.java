@@ -8,16 +8,15 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/api/margin")
 @RequiredArgsConstructor
-public class MarginCompareController {
+public class PremiumMarginController {
 
     private final MarginService marginService;
 
-    @GetMapping("/compare")
-    public MarginCompareResult compare(
+    @GetMapping("/premium")
+    public MarginCompareResult comparePremium(
             @RequestParam String keyword,
-            @RequestParam String lang,
-            @RequestParam(defaultValue = "false") boolean premium
+            @RequestParam String lang
     ) {
-        return marginService.compare(keyword, lang, premium);
+        return marginService.compare(keyword, lang, true);
     }
 }

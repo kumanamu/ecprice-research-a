@@ -1,9 +1,8 @@
 package com.ecprice_research.domain.margin.util;
 
 import com.ecprice_research.domain.margin.dto.MarginCompareResult;
-import com.ecprice_research.domain.margin.dto.PriceInfo;
 
-public class MarginPromptBuilder {
+public class BasicPromptBuilder {
 
     public static String build(MarginCompareResult r) {
 

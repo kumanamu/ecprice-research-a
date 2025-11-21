@@ -56,16 +56,18 @@ public class NaverService {
 
                 Map<String, Object> item = items.get(0);
 
-                long price = Long.parseLong(String.valueOf(item.get("lprice")));
                 String name = ((String) item.get("title"))
                         .replaceAll("<[^>]*>", "");
+
+                long price = Long.parseLong(String.valueOf(item.get("lprice")));
 
                 return PriceInfo.builder()
                         .platform("NAVER")
                         .productName(name)
                         .productUrl((String) item.get("link"))
                         .productImage((String) item.get("image"))
-                        .priceKrw(price)
+                        .priceOriginal((int) price)
+                        .shippingOriginal(0)
                         .currencyOriginal("KRW")
                         .build();
             }
@@ -80,35 +82,26 @@ public class NaverService {
 
 
     // =====================================================================
-    // 🔍 검색 후보 생성 (지침 100% 적용)
+    // 후보 생성
     // =====================================================================
     private List<String> buildVariants(String keyword) {
 
         List<String> cached = KeywordVariantCache.get("NAV_" + keyword);
-        if (cached != null) {
-            log.info("🔁 [Naver 후보 캐시 HIT] {}", cached);
-            return cached;
-        }
+        if (cached != null) return cached;
 
         List<String> list = new ArrayList<>();
 
-        boolean isEnglish = keyword.matches("^[a-zA-Z0-9\\s\\-_.]+$");
-        boolean isKorean  = keyword.matches(".*[가-힣].*");
-        boolean isJapanese = keyword.matches(".*[ぁ-んァ-ン一-龥].*");
+        boolean isEng = keyword.matches("^[a-zA-Z0-9\\s]+$");
+        boolean isKor = keyword.matches(".*[가-힣].*");
+        boolean isJap = keyword.matches(".*[ぁ-んァ-ン一-龥].*");
 
-        // RULE 1: 영어 → 영어 그대로
-        if (isEnglish) list.add(keyword);
-
-            // RULE 2: 한국어 → 한국어 그대로
-        else if (isKorean) list.add(keyword);
-
-            // RULE 3: 일본어 → 한국어로 번역
-        else if (isJapanese) list.add(translateService.jpToKo(keyword));
+        if (isEng) list.add(keyword);
+        else if (isKor) list.add(keyword);
+        else if (isJap) list.add(translateService.jpToKo(keyword));
 
         List<String> result = KeywordVariantCache.filter(list);
         KeywordVariantCache.put("NAV_" + keyword, result);
 
-        log.info("🔍 [Naver 최종 후보] {}", result);
         return result;
     }
 
@@ -119,7 +112,8 @@ public class NaverService {
                 .productName("조회 실패")
                 .productUrl("")
                 .productImage("")
-                .priceKrw(0)
+                .priceOriginal(0)
+                .shippingOriginal(0)
                 .currencyOriginal("KRW")
                 .build();
     }
