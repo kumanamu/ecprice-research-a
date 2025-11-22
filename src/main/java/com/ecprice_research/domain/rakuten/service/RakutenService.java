@@ -5,6 +5,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.json.JSONArray;
 import org.json.JSONObject;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
@@ -18,26 +19,42 @@ public class RakutenService {
 
     private final RestTemplate rest = new RestTemplate();
 
-    private final String APP_ID = "1013279438968124438";
-    private final String AFF_ID = "4e0e3016.41af98ff.4e0e3018.75d936e9";
+    @Value("${rakuten.api.key}")
+    private String appId;
 
-    public PriceInfo search(String keyword) {
+    @Value("${rakuten.api.affiliate}")
+    private String affiliateId;
+
+    @Value("${rakuten.api.apiUrl}")
+    private String rakutenApiUrl;
+
+    /**
+     * Rakuten 검색 (통합 설계에 맞춤)
+     */
+    public PriceInfo search(String keywordJP) {
 
         try {
-            String k = URLEncoder.encode(keyword, StandardCharsets.UTF_8);
+            String encoded = URLEncoder.encode(keywordJP, StandardCharsets.UTF_8);
 
-            String url = "https://app.rakuten.co.jp/services/api/IchibaItem/Search/20220601"
-                    + "?applicationId=" + APP_ID
-                    + "&affiliateId=" + AFF_ID
-                    + "&keyword=" + k
+            String url = rakutenApiUrl
+                    + "?applicationId=" + appId
+                    + "&affiliateId=" + affiliateId
+                    + "&keyword=" + encoded
                     + "&format=json";
 
             log.info("📡 [Rakuten API 요청] {}", url);
 
             String json = rest.getForObject(url, String.class);
+            if (json == null) {
+                return PriceInfo.notFound("RAKUTEN", "응답 없음");
+            }
 
             JSONObject root = new JSONObject(json);
-            JSONArray items = root.getJSONArray("Items");
+            JSONArray items = root.optJSONArray("Items");
+
+            if (items == null || items.length() == 0) {
+                return PriceInfo.notFound("RAKUTEN", "검색 결과 없음");
+            }
 
             JSONObject bestItem = null;
             int bestPrice = Integer.MAX_VALUE;
@@ -48,11 +65,7 @@ public class RakutenService {
                 int price = item.optInt("itemPrice", -1);
                 if (price <= 0) continue;
 
-                String name = item.optString("itemName", "");
-
-                // 키워드가 상품명에 포함된 것만 선택
-                if (!name.contains(keyword) && !name.contains("キムチ")) continue;
-
+                // 하드코딩 필터 제거됨
                 if (price < bestPrice) {
                     bestPrice = price;
                     bestItem = item;
@@ -64,26 +77,21 @@ public class RakutenService {
             }
 
             String title = bestItem.optString("itemName");
-            String url2 = bestItem.optString("itemUrl");
+            String link = bestItem.optString("itemUrl");
             JSONArray imgs = bestItem.optJSONArray("mediumImageUrls");
             String img = (imgs != null && imgs.length() > 0)
                     ? imgs.getJSONObject(0).optString("imageUrl")
                     : null;
 
-            int jpy = bestPrice;
-            int krw = (int)(jpy * 9);
-
             return PriceInfo.builder()
                     .platform("RAKUTEN")
                     .status("SUCCESS")
                     .productName(title)
-                    .productUrl(url2)
+                    .productUrl(link)
                     .productImage(img)
-                    .priceOriginal(jpy)
+                    .priceOriginal(bestPrice)
                     .currencyOriginal("JPY")
-                    .priceKrw(krw)
-                    .priceJpy(jpy)
-                    .displayPrice(jpy + " JPY")
+                    .priceJpy(bestPrice)
                     .timestamp(java.time.LocalDateTime.now())
                     .build();
 

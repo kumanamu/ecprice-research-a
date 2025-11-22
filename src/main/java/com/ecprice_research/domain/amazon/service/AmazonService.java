@@ -5,6 +5,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.json.JSONArray;
 import org.json.JSONObject;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
@@ -18,54 +19,66 @@ public class AmazonService {
 
     private final RestTemplate rest = new RestTemplate();
 
-    private final String SERP_API_KEY = "d7c0dd0ccb16661ed77b37d9e9395ba00646d03ca0f35b72608faf9661253511";
+    @Value("${serpapi.api.key}")
+    private String serpApiKey;
 
-    public PriceInfo search(String keyword) {
+    /**
+     * Amazon JP 검색 서비스 (원샷 통합 규칙에 맞춤)
+     * - keyword: 이미 토글/번역으로 변환된 "검색용 문자열"
+     */
+    public PriceInfo search(String keywordJP) {
 
         try {
-            String k = URLEncoder.encode(keyword, StandardCharsets.UTF_8);
-            String url = "https://serpapi.com/search.json?engine=amazon&amazon_domain=amazon.co.jp&gl=jp&hl=ja&k="
-                    + k + "&api_key=" + SERP_API_KEY;
+            String encoded = URLEncoder.encode(keywordJP, StandardCharsets.UTF_8);
+
+            String url = "https://serpapi.com/search.json"
+                    + "?engine=amazon"
+                    + "&amazon_domain=amazon.co.jp"
+                    + "&gl=jp"
+                    + "&hl=ja"
+                    + "&k=" + encoded
+                    + "&api_key=" + serpApiKey;
 
             log.info("📡 [Amazon API 요청] {}", url);
 
             String json = rest.getForObject(url, String.class);
 
+            if (json == null) {
+                return PriceInfo.notFound("AMAZON_JP", "응답 없음");
+            }
+
             JSONObject root = new JSONObject(json);
             JSONArray organic = root.optJSONArray("organic_results");
 
-            if (organic == null || organic.isEmpty()) {
-                return PriceInfo.notFound("AMAZON_JP", "검색 결과 없음(organic empty)");
+            if (organic == null || organic.length() == 0) {
+                return PriceInfo.notFound("AMAZON_JP", "검색 결과 없음");
             }
 
-            // 후보 필터링
             JSONObject best = null;
+
             for (int i = 0; i < organic.length(); i++) {
-                JSONObject obj = organic.getJSONObject(i);
+                JSONObject item = organic.getJSONObject(i);
 
-                if (!obj.has("extracted_price")) continue;
-                if (!obj.has("thumbnail")) continue;
-                if (!obj.has("asin")) continue;
+                // 가격 있는 것만 필터
+                if (!item.has("extracted_price")) continue;
+                if (!item.has("thumbnail")) continue;
 
-                best = obj;
+                best = item;
                 break;
             }
 
             if (best == null) {
-                return PriceInfo.notFound("AMAZON_JP", "유효한 상품 없음(필터 조건 불일치)");
+                return PriceInfo.notFound("AMAZON_JP", "유효 상품 없음");
             }
 
-            int price = best.optInt("extracted_price", -1);
-            if (price <= 0) {
-                return PriceInfo.notFound("AMAZON_JP", "가격 없음");
+            int priceJPY = best.optInt("extracted_price", -1);
+            if (priceJPY <= 0) {
+                return PriceInfo.notFound("AMAZON_JP", "가격 정보 없음");
             }
 
             String title = best.optString("title", "상품명 없음");
             String link = best.optString("link_clean", best.optString("link", null));
             String thumb = best.optString("thumbnail", null);
-
-            int jpy = price;
-            int krw = (int)(jpy * 9); // 환율은 MarginService에서 다시 변환됨
 
             return PriceInfo.builder()
                     .platform("AMAZON_JP")
@@ -73,12 +86,9 @@ public class AmazonService {
                     .productName(title)
                     .productUrl(link)
                     .productImage(thumb)
-                    .priceOriginal(jpy)
-                    .shippingOriginal(0)
+                    .priceOriginal(priceJPY)
                     .currencyOriginal("JPY")
-                    .priceJpy(jpy)
-                    .priceKrw(krw)
-                    .displayPrice(jpy + " JPY")
+                    .priceJpy(priceJPY)
                     .timestamp(java.time.LocalDateTime.now())
                     .build();
 
