@@ -58,6 +58,8 @@ public class MarginService {
         prices.put("naver", naver);
         prices.put("coupang", coupang);
 
+
+
         // 4) 환율
         ExchangeRate rate = exchangeService.getRate();
         double jpyToKrw = rate.getJpyToKrw();
@@ -130,6 +132,7 @@ public class MarginService {
         if (text.matches(".*[가-힣].*")) return "KR";
         if (text.matches(".*[ぁ-んァ-ン一-龥].*")) return "JP";
         return "EN";
+
     }
 
 
@@ -156,6 +159,8 @@ public class MarginService {
             jp = keyword;
             kr = translateService.jpToKo(keyword);
         }
+        log.info("🔤 [Keyword Convert] detected={}, toggle={}", detected, toggle);
+        log.info("🔤 [Keyword Convert] JP keyword='{}' / KR keyword='{}'", jp, kr);
 
         // 토글은 “출력 언어” 결정용
         // 검색어는 Amazon/Rakuten → jp, Naver/Coupang → kr

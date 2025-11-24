@@ -11,7 +11,9 @@ public class AiMarginAnalysis {
     private String sellPlatform;
     private long profitKrw;
     private double profitRate;
-    private String reason;
+
+    private String text;      // 프론트에서 사용하는 필드
+    private String reason;    // 내부 로깅/요약용
 
     public String summary() {
         return "Buy: " + buyPlatform

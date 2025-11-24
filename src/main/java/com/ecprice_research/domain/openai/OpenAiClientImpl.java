@@ -15,13 +15,12 @@ import java.util.concurrent.TimeUnit;
 @RequiredArgsConstructor
 public class OpenAiClientImpl implements OpenAiClient {
 
-    @Value("${OPENAI_API_KEY}")
+    @Value("${openai.api.key}")
     private String apiKey;
 
-    @Value("${OPENAI_API_MODEL}")
+    @Value("${openai.api.model}")
     private String model;
 
-    // ✅ Timeout 안정화 버전
     private final OkHttpClient client = new OkHttpClient.Builder()
             .connectTimeout(20, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
@@ -32,6 +31,7 @@ public class OpenAiClientImpl implements OpenAiClient {
     public String ask(String prompt) {
 
         try {
+            // 요청 JSON 생성
             JSONObject json = new JSONObject();
             json.put("model", model);
             json.put("max_tokens", 600);
@@ -52,22 +52,52 @@ public class OpenAiClientImpl implements OpenAiClient {
             Request request = new Request.Builder()
                     .url("https://api.openai.com/v1/chat/completions")
                     .addHeader("Authorization", "Bearer " + apiKey)
+                    .addHeader("Content-Type", "application/json")
                     .post(body)
                     .build();
 
             Response response = client.newCall(request).execute();
             String result = response.body().string();
 
+            log.info("🔥 [OpenAI Raw Response] {}", result);
+            log.error("🔥 API KEY 체크: {}", apiKey);
+            log.error("🔥 MODEL 체크: {}", model);
             JSONObject resJson = new JSONObject(result);
 
-            return resJson
-                    .getJSONArray("choices")
-                    .getJSONObject(0)
-                    .getJSONObject("message")
-                    .getString("content");
+            // 실패 응답 처리
+            if (resJson.has("error")) {
+                JSONObject err = resJson.getJSONObject("error");
+                log.error("❌ OpenAI Error: {}", err.optString("message"));
+                return "OpenAI 오류: " + err.optString("message");
+            }
+
+            JSONArray choices = resJson.getJSONArray("choices");
+            JSONObject message = choices.getJSONObject(0).getJSONObject("message");
+
+            Object rawContent = message.get("content");
+            String content = "";
+
+            // 최신 GPT 구조 (배열 기반 content)
+            if (rawContent instanceof JSONArray arr) {
+                StringBuilder sb = new StringBuilder();
+                for (int i = 0; i < arr.length(); i++) {
+                    JSONObject c = arr.getJSONObject(i);
+                    if ("text".equals(c.optString("type"))) {
+                        sb.append(c.optString("text"));
+                    }
+                }
+                content = sb.toString();
+            }
+
+            // 예전 구조(content: String)
+            else if (rawContent instanceof String str) {
+                content = str;
+            }
+
+            return content.trim();
 
         } catch (Exception e) {
-            log.error("❌ OpenAI 호출 오류: {}", e.getMessage());
+            log.error("❌ OpenAI 호출 오류", e);
             return "AI 분석 실패: " + e.getMessage();
         }
     }

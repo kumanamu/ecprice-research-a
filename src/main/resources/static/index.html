@@ -5,6 +5,7 @@
     <title>ECPriceResearch Premium</title>
     <link rel="stylesheet"
           href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap"/>
+
     <style>
         body {
             font-family: 'Inter', sans-serif;
@@ -12,78 +13,59 @@
             margin: 0;
             padding: 0;
         }
-        .container {
-            max-width: 1080px;
-            margin: auto;
-            padding: 20px;
-        }
-        .title {
-            font-size: 28px;
-            font-weight: 700;
-            display: flex;
-            align-items: center;
-            margin-bottom: 18px;
-        }
-        .search-area {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 15px;
-        }
+        .container { max-width: 1080px; margin:auto; padding:20px; }
+        .title { font-size:28px; font-weight:700; margin-bottom:18px; }
+
+        .search-area { display:flex; gap:10px; margin-bottom:15px; }
+
         input {
-            padding: 12px 15px;
-            font-size: 16px;
-            width: 350px;
-            border-radius: 8px;
-            border: 1px solid #ccc;
+            padding:12px 15px;
+            font-size:16px;
+            width:350px;
+            border-radius:8px;
+            border:1px solid #ccc;
         }
+
         button {
-            padding: 10px 20px;
-            font-size: 15px;
-            border-radius: 8px;
-            border: none;
-            background: #444;
-            color: white;
-            cursor: pointer;
+            padding:10px 20px;
+            border:none; border-radius:8px;
+            background:#444; color:white;
+            cursor:pointer;
+            font-size:15px;
         }
+
         .toggle {
-            padding: 6px 14px;
-            border-radius: 8px;
-            border: 1px solid #aaa;
-            background: white;
-            font-size: 14px;
-            cursor: pointer;
+            padding:6px 14px;
+            border-radius:8px;
+            border:1px solid #aaa;
+            background:white;
+            font-size:14px;
+            cursor:pointer;
         }
         .toggle.active {
-            background: #222;
-            color: #fff;
-            border-color: #222;
+            background:#222; color:#fff; border-color:#222;
         }
+
         .platform-grid {
-            display: grid;
+            display:grid;
             grid-template-columns: repeat(3, 1fr);
-            gap: 18px;
-            margin-top: 25px;
+            gap:18px; margin-top:25px;
         }
+
         .card {
-            background: white;
-            border-radius: 12px;
-            padding: 15px;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.08);
-            min-height: 150px;
+            background:white;
+            border-radius:12px;
+            padding:15px;
+            min-height:150px;
+            box-shadow:0 2px 6px rgba(0,0,0,0.08);
         }
-        .price {
-            font-size: 20px;
-            font-weight: 700;
-            color: #ff6f3c;
-            margin: 5px 0;
-        }
+
+        .price { font-size:20px; font-weight:700; color:#ff6f3c; }
+
         .summary-box, .ai-box {
-            background: white;
-            border-radius: 15px;
-            padding: 20px;
-            margin-top: 30px;
-            font-size: 16px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            background:white; border-radius:15px;
+            padding:20px; margin-top:30px;
+            box-shadow:0 2px 8px rgba(0,0,0,0.08);
         }
     </style>
 </head>
@@ -93,9 +75,9 @@
 
     <div class="title">📦 ECPriceResearch Premium</div>
 
-    <div style="display:flex; gap:8px; margin-bottom: 12px;">
+    <div style="display:flex; gap:8px; margin-bottom:12px;">
         <button id="lang-toggle" class="toggle active" data-lang="ko">
-            🇰🇷 한국어 / 🇯🇵 일본語
+            🇰🇷 한국어 / 🇯🇵 日本語
         </button>
         <button id="mode-toggle" class="toggle active" data-mode="basic">
             ⚡ Basic / Premium
@@ -103,7 +85,7 @@
     </div>
 
     <div class="search-area">
-        <input id="keyword" placeholder="검색어 입력 예: adidas samba" />
+        <input id="keyword" placeholder="검색어 입력 예: adidas samba"/>
         <button id="searchBtn">조회</button>
     </div>
 
@@ -116,12 +98,12 @@
         <div class="card" id="coupang"></div>
     </div>
 
-    <div class="summary-box" id="summaryBox">
+    <div class="summary-box">
         <b>💰 가격 요약</b><br>
         <div id="summary"></div>
     </div>
 
-    <div class="ai-box" id="aiBox">
+    <div class="ai-box">
         <b>🤖 AI 분석</b><br>
         <div id="ai"></div>
     </div>
@@ -131,44 +113,49 @@
 <script>
 
     document.getElementById("searchBtn").onclick = search;
-
-    document.getElementById("mode-toggle").onclick = function () {
-        this.dataset.mode = (this.dataset.mode === "basic" ? "premium" : "basic");
-        this.classList.toggle("active");
-        if (lastResult) renderAi(lastResult);
-    };
-
-    document.getElementById("lang-toggle").onclick = function () {
-        this.dataset.lang = (this.dataset.lang === "ko" ? "jp" : "ko");
-        this.classList.toggle("active");
-    };
-
+    document.getElementById("mode-toggle").onclick = toggleMode;
+    document.getElementById("lang-toggle").onclick = toggleLang;
 
     let lastResult = null;
 
-
-    function search() {
-        const keyword = document.getElementById("keyword").value.trim();
-        if (!keyword) return alert("검색어를 입력하세요.");
-
-        const lang = document.getElementById("lang-toggle").dataset.lang;
-
-        const encodedKeyword = encodeURIComponent(keyword);
-        const encodedLang = encodeURIComponent(lang);
-
-        console.log("📡 API 호출:", `/api/margin/compare?keyword=${encodedKeyword}&lang=${encodedLang}`);
-
-        fetch(`/api/margin/compare?keyword=${encodedKeyword}&lang=${encodedLang}`)
-            .then(res => res.json())
-            .then(data => {
-                console.log("📥 백엔드 응답:", data);
-                lastResult = data;
-                renderAll(data);
-            })
-            .catch(e => console.error("❌ FRONT FETCH ERROR:", e));
+    /** 언어 토글 */
+    function toggleLang() {
+        const btn = document.getElementById("lang-toggle");
+        btn.dataset.lang = (btn.dataset.lang === "ko" ? "jp" : "ko");
+        btn.classList.toggle("active");
     }
 
+    /** Basic / Premium 토글 */
+    function toggleMode() {
+        const btn = document.getElementById("mode-toggle");
+        const current = btn.dataset.mode;
 
+        btn.dataset.mode = (current === "basic" ? "premium" : "basic");
+        btn.classList.toggle("active");
+
+        if (lastResult) renderAi(lastResult);
+    }
+
+    /** 검색 */
+    async function search() {
+        const keyword = document.getElementById("keyword").value.trim();
+        const lang = document.getElementById("lang-toggle").dataset.lang;
+        const mode = document.getElementById("mode-toggle").dataset.mode;
+
+        try {
+            const res = await fetch(
+                `/api/margin?keyword=${encodeURIComponent(keyword)}&lang=${lang}&premium=${mode === "premium"}`
+            );
+
+            const data = await res.json();
+
+            lastResult = data;
+            renderAll(data);
+
+        } catch (e) { console.error(e); }
+    }
+
+    /** 전체 렌더 */
     function renderAll(data) {
         if (!data || !data.platformPrices) return;
 
@@ -181,24 +168,24 @@
         renderAi(data);
     }
 
-
+    /** 플랫폼 카드 렌더 */
     function renderPlatform(id, info) {
         const div = document.getElementById(id);
 
         if (!info) {
-            div.innerHTML = "<b>조회 실패</b>";
+            div.innerHTML = "<b>데이터 없음</b>";
             return;
         }
 
         div.innerHTML = `
             <b>${id}</b><br>
-            <span class="price">${info.priceKrw} KRW</span><br>
-            (${info.priceJpy} JPY)<br>
-            <a href="${info.productUrl || '#'}" target="_blank">상품 보기 →</a>
+            <span class="price">${info.priceKrw ?? "N/A"} KRW</span><br>
+            (${info.priceJpy ?? "N/A"} JPY)<br>
+            <a href="${info.productUrl || "#"}" target="_blank">상품 보기 →</a>
         `;
     }
 
-
+    /** 가격 요약 */
     function renderSummary(data) {
         document.getElementById("summary").innerHTML = `
             최저가 플랫폼: ${data.bestPlatform}<br>
@@ -206,14 +193,17 @@
         `;
     }
 
-
+    /** Basic / Premium AI 분석 */
     function renderAi(data) {
         const mode = document.getElementById("mode-toggle").dataset.mode;
 
         let aiText = "AI 준비 중…";
 
-        if (mode === "basic" && data.basicAi) aiText = data.basicAi.text;
-        if (mode === "premium" && data.premiumAi) aiText = data.premiumAi.text;
+        if (mode === "basic" && data.basicAi)
+            aiText = data.basicAi.text;
+
+        if (mode === "premium" && data.premiumAi)
+            aiText = data.premiumAi.text;
 
         document.getElementById("ai").innerHTML =
             `<pre style="white-space: pre-wrap; font-size:17px; line-height:1.45;">${aiText}</pre>`;

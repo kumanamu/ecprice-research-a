@@ -24,13 +24,16 @@ public class OpenAiAnalysisService {
                     : BasicPromptBuilder.build(result);   // 기본 분석
 
             String answer = openAiClient.ask(prompt);
+            log.info("🤖 [AI Analysis] premium={} bestPlatform={}", premium, result.getBestPlatform());
+            log.info("🤖 [AI Analysis Prompt] {}", prompt);
 
             return AiMarginAnalysis.builder()
                     .buyPlatform(result.getBestPlatform())
                     .sellPlatform("Amazon / Rakuten / Coupang / Naver")
                     .profitKrw(result.getProfitKrw())
                     .profitRate(result.getProfitKrw() > 0 ? 100.0 : 0.0)
-                    .reason(answer)
+                    .text(answer)      // 👈 프론트용
+                    .reason(answer)    // 👈 내부요약용 (기존)
                     .build();
 
         } catch (Exception e) {
