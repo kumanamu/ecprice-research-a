@@ -30,34 +30,16 @@ public class PriceInfo {
     public static PriceInfo notFound(String platform, String reason) {
         return PriceInfo.builder()
                 .platform(platform)
-                .status("EMPTY")
-                .productName("검색 결과 없음")
-                .productUrl("")
-                .productImage("")
-                .priceOriginal(0)
-                .currencyOriginal("JPY")
-                .priceJpy(0)
-                .priceKrw(0)
+                .status("NOT_FOUND")
+                .priceOriginal(null)
+                .shippingOriginal(null)
+                .priceKrw(null)
+                .priceJpy(null)
+                .displayPrice("검색 결과 없음")
+                .reason(reason)
                 .timestamp(java.time.LocalDateTime.now())
                 .build();
     }
-
-    public static PriceInfo empty(String platform) {
-        return PriceInfo.builder()
-                .platform(platform)
-                .status("EMPTY")
-                .productName("검색 결과 없음")
-                .productUrl("")
-                .productImage("")
-                .priceOriginal(0)
-                .shippingOriginal(0)
-                .currencyOriginal("JPY")
-                .priceKrw(0)
-                .priceJpy(0)
-                .timestamp(java.time.LocalDateTime.now())
-                .build();
-    }
-
     public boolean isSuccess() {
         return "SUCCESS".equalsIgnoreCase(this.status);
     }

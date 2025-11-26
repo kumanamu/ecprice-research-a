@@ -60,7 +60,8 @@ public class OpenAiClientImpl implements OpenAiClient {
             String result = response.body().string();
 
             log.info("🔥 [OpenAI Raw Response] {}", result);
-
+            log.error("🔥 API KEY 체크: {}", apiKey);
+            log.error("🔥 MODEL 체크: {}", model);
             JSONObject resJson = new JSONObject(result);
 
             // 실패 응답 처리

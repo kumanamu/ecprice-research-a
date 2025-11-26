@@ -2,6 +2,7 @@ package com.ecprice_research.domain.coupang.service;
 
 import com.ecprice_research.domain.margin.dto.PriceInfo;
 import com.ecprice_research.domain.translate.service.TranslateService;
+import com.ecprice_research.util.KeywordVariantCache;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -10,8 +11,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
-import com.ecprice_research.domain.keyword.engine.KeywordVariantBuilder;
-import com.ecprice_research.keyword.engine.KeywordDetect;
 
 import java.net.URI;
 import java.net.URLEncoder;
@@ -29,95 +28,108 @@ public class CoupangService {
     @Value("${coupang.secretKey}")
     private String secretKey;
 
-    private final RestTemplate restTemplate = new RestTemplate();
-    private final ObjectMapper om = new ObjectMapper();
+    private final TranslateService translateService;
 
     private static final String DOMAIN = "https://api-gateway.coupang.com";
     private static final String PATH =
             "/v2/providers/affiliate_open_api/apis/openapi/v1/products/search";
 
-    /** 단일 검색 */
-    public PriceInfo search(List<String> keywords) {
-        log.info("📡 [Coupang] 검색 시작 → '{}'", keywords);
-        if (keywords == null || keywords.isEmpty()) {
-            return PriceInfo.notFound("COUPANG", "No keyword");
-        }
+    private final RestTemplate rest = new RestTemplate();
+    private final ObjectMapper mapper = new ObjectMapper();
 
-        PriceInfo best = null;
+    public PriceInfo search(String keyword) {
 
-        for (String key : keywords) {
-            PriceInfo pi = searchSingle(key);
-            if (pi == null || !pi.isSuccess()) continue;
-            log.warn("❌ [Coupang] 검색 실패 → '{}'", keywords);
-            if (best == null ||
-                    (pi.getPriceKrw() != null &&
-                            pi.getPriceKrw() < best.getPriceKrw())) {
-                log.info("✅ [Coupang] 검색 성공 → {} KRW, {}",
-                best =pi);
-            }
-        }
-
-        return best != null ? best
-                : PriceInfo.notFound("COUPANG", "Not found");
-    }
-
-
-
-    private PriceInfo searchSingle(String keywordKR) {
         try {
-            String encoded = URLEncoder.encode(keywordKR, StandardCharsets.UTF_8);
-            String uri = PATH + "?keyword=" + encoded;
+            List<String> variants = buildVariants(keyword);
 
-            String authorization = CoupangSignatureUtil.generate(
-                    "GET",
-                    uri,
-                    secretKey,
-                    accessKey
-            );
+            for (String k : variants) {
 
-            HttpHeaders headers = new HttpHeaders();
-            headers.set("Authorization", authorization);
+                log.info("🔍 [Coupang 후보] {}", k);
 
-            ResponseEntity<String> response = restTemplate.exchange(
-                    URI.create(DOMAIN + uri),
-                    HttpMethod.GET,
-                    new HttpEntity<>(headers),
-                    String.class
-            );
+                String encoded = URLEncoder.encode(k, StandardCharsets.UTF_8);
+                String uri = PATH + "?keyword=" + encoded;
 
-            return parse(response.getBody());
+                String authorization = CoupangSignatureUtil.generate(
+                        "GET", uri, secretKey, accessKey
+                );
+
+                HttpHeaders headers = new HttpHeaders();
+                headers.set("Authorization", authorization);
+
+                ResponseEntity<String> res = rest.exchange(
+                        URI.create(DOMAIN + uri),
+                        HttpMethod.GET,
+                        new HttpEntity<>(headers),
+                        String.class
+                );
+
+                return parse(res.getBody());
+            }
+
+            return PriceInfo.notFound("COUPANG", "NO_RESULT");
 
         } catch (Exception e) {
-            log.warn("❌ Coupang 조회 실패: {}", e.getMessage());
-            return null;
+            log.error("❌ Coupang Error", e);
+            return PriceInfo.notFound("COUPANG", "EXCEPTION");
         }
+    }
+
+    private List<String> buildVariants(String keyword) {
+
+        List<String> cached = KeywordVariantCache.get("CUP_" + keyword);
+        if (cached != null) {
+            log.info("🔁 [CUP 캐시 HIT] {}", cached);
+            return cached;
+        }
+
+        List<String> list = new ArrayList<>();
+
+        boolean isEnglish = keyword.matches("^[a-zA-Z0-9\\s\\-_.]+$");
+        boolean isKorean = keyword.matches(".*[가-힣].*");
+        boolean isJapanese = keyword.matches(".*[ぁ-んァ-ン一-龥].*");
+
+        if (isEnglish) list.add(keyword);
+        else if (isKorean) list.add(keyword);
+        else if (isJapanese) list.add(translateService.jpToKo(keyword));
+
+        List<String> result = KeywordVariantCache.filter(list);
+        KeywordVariantCache.put("CUP_" + keyword, result);
+
+        return result;
     }
 
     private PriceInfo parse(String json) {
+
         try {
-            JsonNode root = om.readTree(json);
+            JsonNode root = mapper.readTree(json);
 
             if (!"0".equals(root.path("rCode").asText()))
-                return null;
+                return PriceInfo.notFound("COUPANG", "API_ERROR");
 
-            JsonNode data = root.path("data").path("productData");
-            if (data.isMissingNode() || !data.isArray() || data.isEmpty())
-                return null;
+            JsonNode arr = root.path("data").path("productData");
+            if (!arr.isArray() || arr.isEmpty())
+                return PriceInfo.notFound("COUPANG", "NO_DATA");
 
-            JsonNode item = data.get(0);
+            JsonNode item = arr.get(0);
+
+            long price = item.path("productPrice").asLong(0);
+            if (price <= 0)
+                return PriceInfo.notFound("COUPANG", "INVALID_PRICE");
 
             return PriceInfo.builder()
                     .platform("COUPANG")
                     .status("SUCCESS")
-                    .productName(item.path("productName").asText(""))
-                    .productUrl(item.path("productUrl").asText(""))
-                    .productImage(item.path("productImage").asText(""))
-                    .priceOriginal(item.path("productPrice").asInt(0))
+                    .productName(item.path("productName").asText())
+                    .productUrl(item.path("productUrl").asText())
+                    .productImage(item.path("productImage").asText())
+                    .priceOriginal((int) price)  // KRW
                     .currencyOriginal("KRW")
+                    .timestamp(java.time.LocalDateTime.now())
                     .build();
 
         } catch (Exception e) {
-            return null;
+            log.error("❌ Coupang Parse Error", e);
+            return PriceInfo.notFound("COUPANG", "PARSE_EXCEPTION");
         }
     }
 }

@@ -6,8 +6,8 @@ import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 
 @SpringBootApplication
 @ConfigurationPropertiesScan(basePackages = "com.ecprice_research.config")
-public class ECPirceResearchApplication {
+public class ECPriceResearchApplication {
 	public static void main(String[] args) {
-		SpringApplication.run(ECPirceResearchApplication.class, args);
+		SpringApplication.run(ECPriceResearchApplication.class, args);
 	}
 }

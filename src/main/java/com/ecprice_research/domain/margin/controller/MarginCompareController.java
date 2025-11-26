@@ -1,28 +1,30 @@
 package com.ecprice_research.domain.margin.controller;
 
-import com.ecprice_research.domain.margin.dto.MarginCompareResult;
-import com.ecprice_research.domain.margin.service.MarginService;
+import com.ecprice_research.domain.margin.dto.MarginRequest;
+import com.ecprice_research.domain.margin.dto.MarginResponse;
+import com.ecprice_research.domain.margin.service.TotalMarginService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
 @Slf4j
 @RestController
-@RequestMapping("/api/margin")
 @RequiredArgsConstructor
+@RequestMapping("/api/margin")
 public class MarginCompareController {
 
-    private final MarginService marginService;
+    private final TotalMarginService totalService;
 
     @GetMapping("/compare")
-    public MarginCompareResult compare(
+    public MarginResponse compare(
             @RequestParam String keyword,
-            @RequestParam String lang,
-            @RequestParam(defaultValue = "false") boolean premium
-
+            @RequestParam(defaultValue = "kr") String lang
     ) {
+        MarginRequest req = new MarginRequest();
+        req.setKeyword(keyword);
+        req.setLang(lang);
 
-        log.info("🔥 [Controller] keyword='{}' lang='{}' premium={}", keyword, lang, premium);
-        return marginService.compare(keyword, lang, premium);
+        return totalService.compare(req);
     }
 }
+

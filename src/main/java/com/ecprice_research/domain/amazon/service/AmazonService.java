@@ -1,8 +1,7 @@
 package com.ecprice_research.domain.amazon.service;
 
-import com.ecprice_research.domain.keyword.engine.KeywordVariantBuilder;
-import com.ecprice_research.keyword.engine.KeywordDetect;
 import com.ecprice_research.domain.margin.dto.PriceInfo;
+import com.ecprice_research.domain.translate.service.TranslateService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.json.JSONArray;
@@ -13,8 +12,6 @@ import org.springframework.web.client.RestTemplate;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
-import java.time.LocalDateTime;
-import java.util.List;
 
 @Slf4j
 @Service
@@ -22,93 +19,92 @@ import java.util.List;
 public class AmazonService {
 
     private final RestTemplate rest = new RestTemplate();
+    private final TranslateService translate;
 
     @Value("${serpapi.api.key}")
     private String serpApiKey;
 
-  /** 단일 검색 */
-  public PriceInfo search(String keyword) {
-      {
-     log.info("📡 [Amazon] 검색 시작 → '{}'", keyword);
-
-      if (keyword == null || keyword.isEmpty()) {
-          return PriceInfo.notFound("AMAZON_JP", "No keyword");
-      }
-
-      PriceInfo best = null;
-
-      for (String key : keyword) {
-          PriceInfo pi = searchSingle(key);
-
-          if (pi == null || !pi.isSuccess()) continue;
-          log.warn("❌ [Amazon] 검색 실패 → '{}'", keyword);
-          if (best == null ||
-                  (pi.getPriceJpy() != null &&
-                          pi.getPriceJpy() < best.getPriceJpy())) {
-              log.info("✅ [Amazon] 검색 성공 → {} JPY, {}",
-              best = pi);
-
-          }
-      }
-
-      return best != null ? best
-              : PriceInfo.notFound("AMAZON_JP", "Not found");
-  }
-
-
-    private PriceInfo searchSingle(String keywordJP) {
+    public PriceInfo search(String keywordRaw) {
         try {
+            // --------------------------
+            // 🔥 일본 사이트는 무조건 일본어 검색
+            // --------------------------
+            String keywordJP = keywordRaw;
+            if (keywordRaw.matches(".*[가-힣].*")) {
+                keywordJP = translate.koToJp(keywordRaw);
+            }
+
             String encoded = URLEncoder.encode(keywordJP, StandardCharsets.UTF_8);
 
-            String url = "https://serpapi.com/search.json"
-                    + "?engine=amazon"
-                    + "&amazon_domain=amazon.co.jp"
-                    + "&gl=jp"
-                    + "&hl=ja"
-                    + "&k=" + encoded
-                    + "&api_key=" + serpApiKey;
+            String url =
+                    "https://serpapi.com/search.json"
+                            + "?engine=amazon"
+                            + "&amazon_domain=amazon.co.jp"
+                            + "&gl=jp"
+                            + "&hl=ja"
+                            + "&k=" + encoded
+                            + "&api_key=" + serpApiKey;
 
             log.info("📡 [Amazon API 요청] {}", url);
 
             String json = rest.getForObject(url, String.class);
-            if (json == null) return null;
+            if (json == null) {
+                return PriceInfo.notFound("AMAZON_JP", "응답 없음");
+            }
 
             JSONObject root = new JSONObject(json);
             JSONArray organic = root.optJSONArray("organic_results");
 
-            if (organic == null || organic.length() == 0) return null;
+            if (organic == null || organic.length() == 0) {
+                return PriceInfo.notFound("AMAZON_JP", "검색 결과 없음");
+            }
 
             JSONObject best = null;
 
+            // --------------------------
+            // 🔥 가격, 썸네일, 링크 fallback 강화
+            // --------------------------
             for (int i = 0; i < organic.length(); i++) {
+
                 JSONObject item = organic.getJSONObject(i);
 
-                if (!item.has("extracted_price")) continue;
+                int price = item.optInt("extracted_price",
+                        item.optInt("price", -1));
+
+                if (price <= 0) continue;
 
                 best = item;
                 break;
             }
 
-            if (best == null) return null;
+            if (best == null) {
+                return PriceInfo.notFound("AMAZON_JP", "유효 상품 없음");
+            }
 
-            int priceJPY = best.optInt("extracted_price", -1);
-            if (priceJPY <= 0) return null;
+            int priceJPY = best.optInt("extracted_price",
+                    best.optInt("price", 0));
+
+            String title = best.optString("title", "상품명 없음");
+            String link = best.optString("link_clean",
+                    best.optString("link", ""));
+            String thumb = best.optString("thumbnail",
+                    best.optString("image", ""));
 
             return PriceInfo.builder()
                     .platform("AMAZON_JP")
-                    .status("SUCCESS")
-                    .productName(best.optString("title"))
-                    .productUrl(best.optString("link_clean", best.optString("link", null)))
-                    .productImage(best.optString("thumbnail"))
+                    .productName(title)
+                    .productUrl(link)
+                    .productImage(thumb)
                     .priceOriginal(priceJPY)
                     .currencyOriginal("JPY")
                     .priceJpy(priceJPY)
-                    .timestamp(LocalDateTime.now())
+                    .status("SUCCESS")
+                    .timestamp(java.time.LocalDateTime.now())
                     .build();
 
         } catch (Exception e) {
-            log.warn("❌ Amazon 조회 실패: {}", e.getMessage());
-            return null;
+            log.error("❌ Amazon Error: {}", e.getMessage());
+            return PriceInfo.notFound("AMAZON_JP", "예외 발생");
         }
     }
 }

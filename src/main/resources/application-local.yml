@@ -1,4 +1,7 @@
 spring:
+  application:
+    name: ecprice-research
+
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://localhost:3306/ecprice?useSSL=false&serverTimezone=Asia/Seoul&characterEncoding=UTF-8
@@ -33,7 +36,7 @@ coupang:
 rakuten:
   api:
     key: "${RAKUTEN_API_KEY}"
-    secret: "${RAKUTEN_API_SECRET}"      # 필요 시 사용 (지금 구조에선 key만 필수)
+    secret: "${RAKUTEN_API_SECRET}"
     affiliate: "${RAKUTEN_AFFILIATE_ID}"
     apiUrl: "https://app.rakuten.co.jp/services/api/IchibaItem/Search/20220601"
 
@@ -52,7 +55,6 @@ exchange:
     list: "https://api.exchangerate.host/list"
     historical: "https://api.exchangerate.host/historical"
 
-
 # ========== GOOGLE OAUTH2 ==========
 google:
   oauth:
@@ -67,3 +69,7 @@ logging:
   level:
     com.ecprice_research.domain.coupang.util: DEBUG
     com.ecprice_research.domain.coupang.service: DEBUG
+    root: INFO
+
+server:
+  port: 8080
