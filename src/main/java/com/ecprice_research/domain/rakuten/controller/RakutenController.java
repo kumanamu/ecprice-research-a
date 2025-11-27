@@ -1,7 +1,7 @@
 package com.ecprice_research.domain.rakuten.controller;
 
 import com.ecprice_research.domain.margin.dto.PriceInfo;
-import com.ecprice_research.domain.search.engine.CEngine;
+import com.ecprice_research.domain.rakuten.service.RakutenService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -10,10 +10,10 @@ import org.springframework.web.bind.annotation.*;
 @RequiredArgsConstructor
 public class RakutenController {
 
-    private final CEngine cEngine;
+    private final RakutenService rakutenService;
 
     @GetMapping("/search")
     public PriceInfo search(@RequestParam String keyword) {
-        return cEngine.runSingle("RAKUTEN", keyword);
+        return (PriceInfo) rakutenService.search(keyword);
     }
 }

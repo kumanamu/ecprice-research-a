@@ -1,7 +1,6 @@
 package com.ecprice_research.domain.rakuten.service;
 
 import com.ecprice_research.domain.margin.dto.PriceInfo;
-import com.ecprice_research.domain.translate.service.TranslateService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.json.JSONArray;
@@ -19,7 +18,6 @@ import java.nio.charset.StandardCharsets;
 public class RakutenService {
 
     private final RestTemplate rest = new RestTemplate();
-    private final TranslateService translate;
 
     @Value("${rakuten.api.key}")
     private String appId;
@@ -30,15 +28,12 @@ public class RakutenService {
     @Value("${rakuten.api.apiUrl}")
     private String rakutenApiUrl;
 
-    public PriceInfo search(String keywordRaw) {
+    /**
+     * Rakuten 검색 (통합 설계에 맞춤)
+     */
+    public PriceInfo search(String keywordJP) {
 
         try {
-            // 🔥 일본 사이트 → 일본어로 강제 변환
-            String keywordJP = keywordRaw;
-            if (keywordRaw.matches(".*[가-힣].*")) {
-                keywordJP = translate.koToJp(keywordRaw);
-            }
-
             String encoded = URLEncoder.encode(keywordJP, StandardCharsets.UTF_8);
 
             String url = rakutenApiUrl
@@ -58,7 +53,7 @@ public class RakutenService {
             JSONArray items = root.optJSONArray("Items");
 
             if (items == null || items.length() == 0) {
-                return PriceInfo.notFound("RAKUTEN", "검색 없음");
+                return PriceInfo.notFound("RAKUTEN", "검색 결과 없음");
             }
 
             JSONObject bestItem = null;
@@ -70,6 +65,7 @@ public class RakutenService {
                 int price = item.optInt("itemPrice", -1);
                 if (price <= 0) continue;
 
+                // 하드코딩 필터 제거됨
                 if (price < bestPrice) {
                     bestPrice = price;
                     bestItem = item;
@@ -77,31 +73,30 @@ public class RakutenService {
             }
 
             if (bestItem == null) {
-                return PriceInfo.notFound("RAKUTEN", "유효 상품 없음");
+                return PriceInfo.notFound("RAKUTEN", "유효한 상품 없음");
             }
 
             String title = bestItem.optString("itemName");
             String link = bestItem.optString("itemUrl");
-
             JSONArray imgs = bestItem.optJSONArray("mediumImageUrls");
             String img = (imgs != null && imgs.length() > 0)
                     ? imgs.getJSONObject(0).optString("imageUrl")
-                    : "";
+                    : null;
 
             return PriceInfo.builder()
                     .platform("RAKUTEN")
+                    .status("SUCCESS")
                     .productName(title)
                     .productUrl(link)
                     .productImage(img)
                     .priceOriginal(bestPrice)
                     .currencyOriginal("JPY")
                     .priceJpy(bestPrice)
-                    .status("SUCCESS")
                     .timestamp(java.time.LocalDateTime.now())
                     .build();
 
         } catch (Exception e) {
-            log.error("❌ Rakuten Error: {}", e.getMessage());
+            log.warn("❌ Rakuten 조회 실패: {}", e.getMessage());
             return PriceInfo.notFound("RAKUTEN", "예외 발생");
         }
     }

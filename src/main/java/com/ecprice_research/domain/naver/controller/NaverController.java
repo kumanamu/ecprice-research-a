@@ -1,7 +1,7 @@
 package com.ecprice_research.domain.naver.controller;
 
 import com.ecprice_research.domain.margin.dto.PriceInfo;
-import com.ecprice_research.domain.search.engine.CEngine;
+import com.ecprice_research.domain.naver.service.NaverService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -10,10 +10,10 @@ import org.springframework.web.bind.annotation.*;
 @RequiredArgsConstructor
 public class NaverController {
 
-    private final CEngine cEngine;
+    private final NaverService naverService;
 
     @GetMapping("/search")
     public PriceInfo search(@RequestParam String keyword) {
-        return cEngine.runSingle("NAVER_SHOPPING", keyword);
+        return (PriceInfo) naverService.search(keyword);
     }
 }

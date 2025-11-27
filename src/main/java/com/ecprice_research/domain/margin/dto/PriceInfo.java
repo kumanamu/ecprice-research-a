@@ -40,7 +40,4 @@ public class PriceInfo {
                 .timestamp(java.time.LocalDateTime.now())
                 .build();
     }
-    public boolean isSuccess() {
-        return "SUCCESS".equalsIgnoreCase(this.status);
-    }
 }

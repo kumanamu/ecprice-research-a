@@ -31,11 +31,9 @@ public class OpenAiClientImpl implements OpenAiClient {
     public String ask(String prompt) {
 
         try {
-            // 요청 JSON 생성
+            // 최신 OpenAI 규격: max_tokens / temperature 제거
             JSONObject json = new JSONObject();
             json.put("model", model);
-            json.put("max_tokens", 600);
-            json.put("temperature", 0.2);
 
             JSONArray messages = new JSONArray();
             messages.put(new JSONObject()
@@ -52,7 +50,6 @@ public class OpenAiClientImpl implements OpenAiClient {
             Request request = new Request.Builder()
                     .url("https://api.openai.com/v1/chat/completions")
                     .addHeader("Authorization", "Bearer " + apiKey)
-                    .addHeader("Content-Type", "application/json")
                     .post(body)
                     .build();
 
@@ -60,41 +57,41 @@ public class OpenAiClientImpl implements OpenAiClient {
             String result = response.body().string();
 
             log.info("🔥 [OpenAI Raw Response] {}", result);
-            log.error("🔥 API KEY 체크: {}", apiKey);
-            log.error("🔥 MODEL 체크: {}", model);
+
             JSONObject resJson = new JSONObject(result);
 
-            // 실패 응답 처리
             if (resJson.has("error")) {
                 JSONObject err = resJson.getJSONObject("error");
-                log.error("❌ OpenAI Error: {}", err.optString("message"));
+                log.error("❌ OpenAI Error: {}", err.toString());
                 return "OpenAI 오류: " + err.optString("message");
             }
 
-            JSONArray choices = resJson.getJSONArray("choices");
+            JSONArray choices = resJson.optJSONArray("choices");
+            if (choices == null || choices.isEmpty()) {
+                return "AI 응답 없음";
+            }
+
             JSONObject message = choices.getJSONObject(0).getJSONObject("message");
-
             Object rawContent = message.get("content");
-            String content = "";
 
-            // 최신 GPT 구조 (배열 기반 content)
+            // 최신 구조는 content 배열
             if (rawContent instanceof JSONArray arr) {
                 StringBuilder sb = new StringBuilder();
                 for (int i = 0; i < arr.length(); i++) {
-                    JSONObject c = arr.getJSONObject(i);
-                    if ("text".equals(c.optString("type"))) {
-                        sb.append(c.optString("text"));
+                    JSONObject item = arr.getJSONObject(i);
+                    if ("text".equals(item.optString("type"))) {
+                        sb.append(item.optString("text"));
                     }
                 }
-                content = sb.toString();
+                return sb.toString().trim();
             }
 
-            // 예전 구조(content: String)
-            else if (rawContent instanceof String str) {
-                content = str;
+            // 예전 구조는 String
+            if (rawContent instanceof String s) {
+                return s.trim();
             }
 
-            return content.trim();
+            return "AI 응답 파싱 실패";
 
         } catch (Exception e) {
             log.error("❌ OpenAI 호출 오류", e);

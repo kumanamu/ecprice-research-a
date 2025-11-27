@@ -1,11 +1,9 @@
 package com.ecprice_research.domain.margin.dto;
 
-import lombok.*;
+import lombok.Builder;
+import lombok.Data;
 
-@Getter
-@Setter
-@NoArgsConstructor   // 🔥 PremiumMarginService에서 필요
-@AllArgsConstructor
+@Data
 @Builder
 public class AiMarginAnalysis {
 

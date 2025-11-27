@@ -1,7 +1,6 @@
 package com.ecprice_research.domain.amazon.service;
 
 import com.ecprice_research.domain.margin.dto.PriceInfo;
-import com.ecprice_research.domain.translate.service.TranslateService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.json.JSONArray;
@@ -19,35 +18,31 @@ import java.nio.charset.StandardCharsets;
 public class AmazonService {
 
     private final RestTemplate rest = new RestTemplate();
-    private final TranslateService translate;
 
     @Value("${serpapi.api.key}")
     private String serpApiKey;
 
-    public PriceInfo search(String keywordRaw) {
-        try {
-            // --------------------------
-            // 🔥 일본 사이트는 무조건 일본어 검색
-            // --------------------------
-            String keywordJP = keywordRaw;
-            if (keywordRaw.matches(".*[가-힣].*")) {
-                keywordJP = translate.koToJp(keywordRaw);
-            }
+    /**
+     * Amazon JP 검색 서비스 (원샷 통합 규칙에 맞춤)
+     * - keyword: 이미 토글/번역으로 변환된 "검색용 문자열"
+     */
+    public PriceInfo search(String keywordJP) {
 
+        try {
             String encoded = URLEncoder.encode(keywordJP, StandardCharsets.UTF_8);
 
-            String url =
-                    "https://serpapi.com/search.json"
-                            + "?engine=amazon"
-                            + "&amazon_domain=amazon.co.jp"
-                            + "&gl=jp"
-                            + "&hl=ja"
-                            + "&k=" + encoded
-                            + "&api_key=" + serpApiKey;
+            String url = "https://serpapi.com/search.json"
+                    + "?engine=amazon"
+                    + "&amazon_domain=amazon.co.jp"
+                    + "&gl=jp"
+                    + "&hl=ja"
+                    + "&k=" + encoded
+                    + "&api_key=" + serpApiKey;
 
             log.info("📡 [Amazon API 요청] {}", url);
 
             String json = rest.getForObject(url, String.class);
+
             if (json == null) {
                 return PriceInfo.notFound("AMAZON_JP", "응답 없음");
             }
@@ -61,17 +56,12 @@ public class AmazonService {
 
             JSONObject best = null;
 
-            // --------------------------
-            // 🔥 가격, 썸네일, 링크 fallback 강화
-            // --------------------------
             for (int i = 0; i < organic.length(); i++) {
-
                 JSONObject item = organic.getJSONObject(i);
 
-                int price = item.optInt("extracted_price",
-                        item.optInt("price", -1));
-
-                if (price <= 0) continue;
+                // 가격 있는 것만 필터
+                if (!item.has("extracted_price")) continue;
+                if (!item.has("thumbnail")) continue;
 
                 best = item;
                 break;
@@ -81,29 +71,29 @@ public class AmazonService {
                 return PriceInfo.notFound("AMAZON_JP", "유효 상품 없음");
             }
 
-            int priceJPY = best.optInt("extracted_price",
-                    best.optInt("price", 0));
+            int priceJPY = best.optInt("extracted_price", -1);
+            if (priceJPY <= 0) {
+                return PriceInfo.notFound("AMAZON_JP", "가격 정보 없음");
+            }
 
             String title = best.optString("title", "상품명 없음");
-            String link = best.optString("link_clean",
-                    best.optString("link", ""));
-            String thumb = best.optString("thumbnail",
-                    best.optString("image", ""));
+            String link = best.optString("link_clean", best.optString("link", null));
+            String thumb = best.optString("thumbnail", null);
 
             return PriceInfo.builder()
                     .platform("AMAZON_JP")
+                    .status("SUCCESS")
                     .productName(title)
                     .productUrl(link)
                     .productImage(thumb)
                     .priceOriginal(priceJPY)
                     .currencyOriginal("JPY")
                     .priceJpy(priceJPY)
-                    .status("SUCCESS")
                     .timestamp(java.time.LocalDateTime.now())
                     .build();
 
         } catch (Exception e) {
-            log.error("❌ Amazon Error: {}", e.getMessage());
+            log.warn("❌ Amazon 조회 실패: {}", e.getMessage());
             return PriceInfo.notFound("AMAZON_JP", "예외 발생");
         }
     }

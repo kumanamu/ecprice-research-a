@@ -18,53 +18,103 @@ import java.util.*;
 public class NaverService {
 
     private final NaverConfig config;
-    private final TranslateService translate;
-    private final RestTemplate rest = new RestTemplate();
+    private final TranslateService translateService;
+    private final RestTemplate restTemplate = new RestTemplate();
 
+
+    // =====================================================================
+    // 🔍 메인 검색
+    // =====================================================================
     public PriceInfo search(String keyword) {
 
         try {
-            // 한글 그대로, 일본어면 → 한국어 변환
-            if (keyword.matches(".*[ぁ-んァ-ン一-龥].*")) {
-                keyword = translate.jpToKo(keyword);
+            List<String> variants = buildVariants(keyword);
+
+            for (String k : variants) {
+
+                String url = config.buildSearchUrl(k);
+                log.info("📡 [Naver 요청] {}", url);
+
+                HttpHeaders headers = new HttpHeaders();
+                headers.set("X-Naver-Client-Id", config.getId());
+                headers.set("X-Naver-Client-Secret", config.getSecret());
+
+                ResponseEntity<Map> response = restTemplate.exchange(
+                        url,
+                        HttpMethod.GET,
+                        new HttpEntity<>(headers),
+                        Map.class
+                );
+
+                Map<String, Object> body = response.getBody();
+                if (body == null) continue;
+
+                List<Map<String, Object>> items =
+                        (List<Map<String, Object>>) body.get("items");
+
+                if (items == null || items.isEmpty()) continue;
+
+                Map<String, Object> item = items.get(0);
+
+                String name = ((String) item.get("title"))
+                        .replaceAll("<[^>]*>", "");
+
+                long price = Long.parseLong(String.valueOf(item.get("lprice")));
+
+                return PriceInfo.builder()
+                        .platform("NAVER")
+                        .productName(name)
+                        .productUrl((String) item.get("link"))
+                        .productImage((String) item.get("image"))
+                        .priceOriginal((int) price)
+                        .shippingOriginal(0)
+                        .currencyOriginal("KRW")
+                        .build();
             }
 
-            String url = config.buildSearchUrl(keyword);
-            log.info("📡 [Naver 요청] {}", url);
-
-            HttpHeaders headers = new HttpHeaders();
-            headers.set("X-Naver-Client-Id", config.getId());
-            headers.set("X-Naver-Client-Secret", config.getSecret());
-
-            ResponseEntity<Map> response = rest.exchange(
-                    url, HttpMethod.GET, new HttpEntity<>(headers), Map.class
-            );
-
-            Map<String, Object> body = response.getBody();
-            if (body == null) return PriceInfo.notFound("NAVER", "응답 없음");
-
-            List<Map<String, Object>> list = (List<Map<String, Object>>) body.get("items");
-            if (list == null || list.isEmpty()) return PriceInfo.notFound("NAVER", "검색 없음");
-
-            Map<String, Object> item = list.get(0);
-
-            String name = ((String) item.get("title")).replaceAll("<[^>]*>", "");
-            int price = Integer.parseInt((String) item.get("lprice"));
-
-            return PriceInfo.builder()
-                    .platform("NAVER")
-                    .productName(name)
-                    .productUrl((String) item.get("link"))
-                    .productImage((String) item.get("image"))
-                    .priceOriginal(price)
-                    .currencyOriginal("KRW")
-                    .priceKrw(price)
-                    .status("SUCCESS")
-                    .build();
+            return error();
 
         } catch (Exception e) {
             log.error("❌ Naver Error: {}", e.getMessage());
-            return PriceInfo.notFound("NAVER", "예외 발생");
+            return error();
         }
+    }
+
+
+    // =====================================================================
+    // 후보 생성
+    // =====================================================================
+    private List<String> buildVariants(String keyword) {
+
+        List<String> cached = KeywordVariantCache.get("NAV_" + keyword);
+        if (cached != null) return cached;
+
+        List<String> list = new ArrayList<>();
+
+        boolean isEng = keyword.matches("^[a-zA-Z0-9\\s]+$");
+        boolean isKor = keyword.matches(".*[가-힣].*");
+        boolean isJap = keyword.matches(".*[ぁ-んァ-ン一-龥].*");
+
+        if (isEng) list.add(keyword);
+        else if (isKor) list.add(keyword);
+        else if (isJap) list.add(translateService.jpToKo(keyword));
+
+        List<String> result = KeywordVariantCache.filter(list);
+        KeywordVariantCache.put("NAV_" + keyword, result);
+
+        return result;
+    }
+
+
+    private PriceInfo error() {
+        return PriceInfo.builder()
+                .platform("NAVER")
+                .productName("조회 실패")
+                .productUrl("")
+                .productImage("")
+                .priceOriginal(0)
+                .shippingOriginal(0)
+                .currencyOriginal("KRW")
+                .build();
     }
 }
